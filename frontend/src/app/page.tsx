@@ -122,8 +122,8 @@ export default function Chatbot() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [input, setInput]                 = useState("");
   const [isLoading, setIsLoading]         = useState(false);
-  const [languageMode, setLanguageMode]   = useState("document_language");
-  const [respondInEnglish, setRespondInEnglish] = useState(false);
+  // languageMode: only two options remain (document_language removed).
+  const [languageMode, setLanguageMode]   = useState<"en_only" | "fr_with_en_sources">("fr_with_en_sources");
   const [uiLocale, setUiLocale]           = useState<"fr" | "en">("fr");
   const [chatView, setChatView]           = useState<"summary" | "detail">("summary");
   const [showFilters, setShowFilters]     = useState(false);
@@ -197,7 +197,10 @@ export default function Chatbot() {
     </div>
   );
 
-  const responseLocale = respondInEnglish || languageMode === "en_only" ? "en" : uiLocale;
+  // Response language is driven by languageMode, not the UI locale.
+  // FR/EN sidebar toggle only affects UI labels.
+  const respondInEnglish = languageMode === "en_only";
+  const responseLocale   = languageMode === "en_only" ? "en" : "fr";
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -340,18 +343,23 @@ export default function Chatbot() {
               <button className={chatView === "detail" ? "active" : ""} onClick={() => setChatView("detail")} id="view-detail-btn">{lbl.viewDetail}</button>
             </div>
 
-            {/* Language mode */}
-            <select className="topbar-select" value={languageMode} onChange={e => setLanguageMode(e.target.value)} id="lang-mode-select">
-              <option value="document_language">{lbl.langDoc}</option>
-              <option value="en_only">{lbl.langEnOnly}</option>
-              <option value="fr_with_en_sources">{lbl.langFrEnSrc}</option>
-            </select>
-
-            {/* EN toggle */}
-            <label className="check-label">
-              <input type="checkbox" checked={respondInEnglish} onChange={e => setRespondInEnglish(e.target.checked)} />
-              {lbl.respEn}
-            </label>
+            {/* Response language selector — EN only or FR + EN sources */}
+            <div className="topbar-toggle" title={uiLocale === "en" ? "Response language" : "Langue de réponse"}>
+              {([
+                { value: "en_only",            label: uiLocale === "en" ? "EN only"        : "EN seul" },
+                { value: "fr_with_en_sources", label: uiLocale === "en" ? "FR + EN sources" : "FR + src EN" },
+              ] as const).map(opt => (
+                <button
+                  key={opt.value}
+                  id={`lang-mode-${opt.value}`}
+                  className={languageMode === opt.value ? "active" : ""}
+                  onClick={() => setLanguageMode(opt.value)}
+                  title={opt.label}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
 
             {/* Filters */}
             <button className={`topbar-btn${showFilters ? " active" : ""}`} onClick={() => setShowFilters(s => !s)} id="filters-btn">

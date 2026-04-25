@@ -403,17 +403,10 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
     if not rag_hits:
         return _not_found_payload(locale)
 
-    if language_mode == "en_only":
-        rag_hits = [(doc, distance) for doc, distance in rag_hits if str(doc.metadata.get("language", "")).lower().startswith("en")]
-        if not rag_hits:
-            return {
-                "summary": "RAG only: no relevant English sources found.",
-                "summary_bullets": ["- No indexed EN source matched the query."],
-                "details": "Switch language mode or add English documents.",
-                "detail_sections": [],
-                "confidence": "Low" if locale.startswith("en") else "Faible",
-                "sources": [],
-            }
+    # Language filtering is intentionally NOT done at the RAG/vector-search level.
+    # The LLM handles the response language via its system prompt (respond_english flag).
+    # Filtering by language tag here would silently block relevant chunks from
+    # documents that were uploaded without an explicit language tag.
 
     sources = []
     context_snippets = []
@@ -525,8 +518,12 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
             + combined_context
         )
 
+    # respond_english drives the LLM system prompt language.
+    # en_only  → always EN
+    # fr_with_en_sources → always FR (LLM prompt in FR but cites EN excerpts)
+    # document_language  → let the LLM infer from context (defaults to FR unless forced)
     respond_english = bool(
-        payload.respond_in_english or language_mode == "en_only" or locale.startswith("en")
+        payload.respond_in_english or language_mode == "en_only"
     )
     generation_mode = "excerpts"
     rag_synthesis: str | None = None
@@ -557,6 +554,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
                     user_query=query,
                     numbered_context=numbered,
                     respond_english=respond_english,
+                    language_mode=language_mode,
                 )
                 if syn:
                     generation_mode = "llm"

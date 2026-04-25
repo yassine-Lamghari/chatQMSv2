@@ -8,6 +8,14 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8
 
 export default function AdminInterface() {
   const [activeTab, setActiveTab] = useState("config");
+
+  // ── F4 Audit state ──────────────────────────────────────────────
+  const [auditStandard, setAuditStandard] = useState("ISO 9001");
+  const [auditProcess, setAuditProcess]   = useState("");
+  const [auditDepth, setAuditDepth]       = useState("normal");
+  const [auditResult, setAuditResult]     = useState<any>(null);
+  const [auditLoading, setAuditLoading]   = useState(false);
+  const [auditError, setAuditError]       = useState<string | null>(null);
   const [user, setUser] = useState<{username: string, role: string} | null>(null);
   const router = useRouter();
 
@@ -47,6 +55,27 @@ export default function AdminInterface() {
       fetchLlmConfig();
     }
   }, [activeTab]);
+
+  const handleGenerateAudit = async () => {
+    if (!auditProcess.trim()) { setAuditError("Veuillez saisir un processus."); return; }
+    setAuditLoading(true); setAuditError(null); setAuditResult(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/audit/assistant`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ standard: auditStandard, process: auditProcess, depth: auditDepth, top_k: 5 }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || "Erreur serveur"); }
+      setAuditResult(await res.json());
+    } catch (e: any) {
+      setAuditError(e.message || "Erreur lors de la génération.");
+    } finally { setAuditLoading(false); }
+  };
+
+  const handleExportAudit = (fmt: "docx" | "pdf") => {
+    const params = new URLSearchParams({ standard: auditStandard, process: auditProcess, format: fmt });
+    window.open(`${API_BASE_URL}/api/audit/export?${params}`, "_blank");
+  };
 
   const fetchLlmConfig = async () => {
     try {
@@ -285,6 +314,12 @@ export default function AdminInterface() {
             className={`text-left px-4 py-2 rounded-lg transition ${activeTab === "users" ? "bg-blue-600/20 text-blue-400" : "hover:bg-slate-700 text-slate-300"}`}
           >
             Utilisateurs
+          </button>
+          <button
+            onClick={() => setActiveTab("audit")}
+            className={`text-left px-4 py-2 rounded-lg transition ${activeTab === "audit" ? "bg-amber-600/20 text-amber-400" : "hover:bg-slate-700 text-slate-300"}`}
+          >
+            🗂 Assistant Audit QMS
           </button>
         </div>
 
@@ -603,6 +638,158 @@ export default function AdminInterface() {
                 </table>
               )}
             </div>
+          </div>
+        )}
+        {/* ── F4 AUDIT QMS ── */}
+        {activeTab === "audit" && (
+          <div className="max-w-4xl space-y-6">
+            {/* Config card */}
+            <div className="bg-[#1e293b] border border-slate-700 rounded-2xl p-6 shadow-lg">
+              <h3 className="text-xl font-semibold mb-1">🗂 Assistant Audit QMS</h3>
+              <p className="text-slate-400 text-sm mb-6">Génère une checklist normative, un plan d'audit et des vérifications RAG basées sur vos documents.</p>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                {/* Standard */}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Norme</label>
+                  <select
+                    value={auditStandard}
+                    onChange={e => setAuditStandard(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="ISO 9001">ISO 9001:2015</option>
+                    <option value="IATF 16949">IATF 16949:2016</option>
+                    <option value="ISO 14001">ISO 14001:2015</option>
+                    <option value="ISO 45001">ISO 45001:2018</option>
+                  </select>
+                </div>
+
+                {/* Process */}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Processus ciblé</label>
+                  <input
+                    value={auditProcess}
+                    onChange={e => setAuditProcess(e.target.value)}
+                    placeholder="ex: Document control, Production…"
+                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-amber-500 placeholder-slate-500"
+                  />
+                </div>
+
+                {/* Depth */}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Profondeur</label>
+                  <select
+                    value={auditDepth}
+                    onChange={e => setAuditDepth(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="light">Rapide (Light)</option>
+                    <option value="normal">Standard (Normal)</option>
+                    <option value="deep">Approfondi (Deep)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleGenerateAudit}
+                  disabled={auditLoading}
+                  className="bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 text-white font-semibold rounded-lg px-6 py-2 transition flex items-center gap-2"
+                >
+                  {auditLoading ? (
+                    <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeOpacity="0.3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="white" strokeWidth="3" strokeLinecap="round"/></svg> Génération…</>
+                  ) : ("⚡ Générer la checklist")}
+                </button>
+
+                {auditResult && (
+                  <>
+                    <button
+                      onClick={() => handleExportAudit("docx")}
+                      className="border border-blue-500 text-blue-400 hover:bg-blue-500/10 font-medium rounded-lg px-4 py-2 transition text-sm flex items-center gap-1"
+                    >
+                      📄 Export Word
+                    </button>
+                    <button
+                      onClick={() => handleExportAudit("pdf")}
+                      className="border border-red-500 text-red-400 hover:bg-red-500/10 font-medium rounded-lg px-4 py-2 transition text-sm flex items-center gap-1"
+                    >
+                      📕 Export PDF
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {auditError && (
+                <p className="mt-3 text-red-400 text-sm bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2">{auditError}</p>
+              )}
+            </div>
+
+            {/* Results */}
+            {auditResult && (
+              <>
+                {/* Audit Plan */}
+                <div className="bg-[#1e293b] border border-slate-700 rounded-2xl p-6">
+                  <h4 className="font-semibold text-slate-200 mb-4">📅 Plan d'audit — {auditResult.standard} · {auditResult.process}</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {(auditResult.audit_plan || []).map((day: any, i: number) => (
+                      <div key={i} className="bg-slate-800/60 border border-slate-700 rounded-xl p-4">
+                        <p className="text-amber-400 font-bold text-sm mb-1">Jour {day.day}</p>
+                        <p className="text-slate-300 text-sm">{day.focus}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sampling */}
+                {auditResult.sampling && Object.keys(auditResult.sampling).length > 0 && (
+                  <div className="bg-[#1e293b] border border-slate-700 rounded-2xl p-6">
+                    <h4 className="font-semibold text-slate-200 mb-3">🎯 Plan d'échantillonnage</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      {Object.entries(auditResult.sampling).map(([k, v]: any) => (
+                        <div key={k} className="bg-slate-800 rounded-lg px-3 py-2">
+                          <p className="text-xs text-slate-400">{k}</p>
+                          <p className="text-slate-200 text-sm font-medium">{v}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Normative Checklist */}
+                <div className="bg-[#1e293b] border border-slate-700 rounded-2xl p-6">
+                  <h4 className="font-semibold text-slate-200 mb-3">✅ Checklist normative ({(auditResult.checklist_normative || []).length} points)</h4>
+                  <ul className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                    {(auditResult.checklist_normative || []).map((q: string, i: number) => (
+                      <li key={i} className="flex gap-3 text-sm">
+                        <span className="text-amber-400 font-bold shrink-0">{i + 1}.</span>
+                        <span className="text-slate-300">{q}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* RAG Evidence Checks */}
+                {(auditResult.rag_evidence_checks || []).length > 0 && (
+                  <div className="bg-[#1e293b] border border-amber-600/30 rounded-2xl p-6">
+                    <h4 className="font-semibold text-amber-400 mb-3">🔍 Vérifications RAG — preuves documentaires ({(auditResult.sources || []).length} sources)</h4>
+                    <ul className="space-y-2">
+                      {(auditResult.rag_evidence_checks || []).map((check: string, i: number) => (
+                        <li key={i} className="bg-slate-800/60 rounded-lg px-4 py-2 text-sm text-slate-300">{check}</li>
+                      ))}
+                    </ul>
+                    {(auditResult.sources || []).length > 0 && (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {(auditResult.sources || []).map((s: any, i: number) => (
+                          <span key={i} className="text-xs bg-slate-700 text-slate-300 rounded-full px-3 py-1">
+                            {s.filename} · rel. {s.relevance}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>

@@ -160,6 +160,7 @@ def synthesize_from_context(
     user_query: str,
     numbered_context: str,
     respond_english: bool,
+    language_mode: str = "document_language",
 ) -> dict[str, Any] | None:
     """
     Returns dict with keys: summary, summary_bullets, details, answer_in_context (bool).
@@ -168,11 +169,11 @@ def synthesize_from_context(
     if respond_english:
         system = (
             "You are a QMS documentation assistant. You ONLY use the CONTEXT passages below "
-            "(indexed [1], [2], …). Do not invent procedures, numbers, or requirements not present in CONTEXT. "
+            "(indexed [1], [2], \u2026). Do not invent procedures, numbers, or requirements not present in CONTEXT. "
             "If CONTEXT does not answer the question, set answer_in_context to false and say so clearly in summary.\n"
             "Reply with a single JSON object, no markdown fences, keys exactly:\n"
             '{"summary": string, "summary_bullets": array of strings, "details": string, "answer_in_context": boolean}\n'
-            "summary: 2–4 sentences. summary_bullets: 3–8 concise points (no leading dashes required). "
+            "summary: 2\u20134 sentences. summary_bullets: 3\u20138 concise points (no leading dashes required). "
             "details: structured synthesis referencing sources like [1], [2]. "
             "Write everything in English."
         )
@@ -180,15 +181,16 @@ def synthesize_from_context(
     else:
         system = (
             "Tu es un assistant documentation QMS. Tu utilises UNIQUEMENT les passages CONTEXT ci-dessous "
-            "(numérotés [1], [2], …). N’invente pas d’exigences, numéros de procédure ou données absentes du CONTEXT. "
-            "Si le CONTEXT ne permet pas de répondre, mets answer_in_context à false et explique-le clairement dans summary.\n"
-            "Réponds par un seul objet JSON, sans balises markdown, clés exactement :\n"
+            "(num\u00e9rot\u00e9s [1], [2], \u2026). N'invente pas d'exigences, num\u00e9ros de proc\u00e9dure ou donn\u00e9es absentes du CONTEXT. "
+            "Si le CONTEXT ne permet pas de r\u00e9pondre, mets answer_in_context \u00e0 false et explique-le clairement dans summary.\n"
+            "R\u00e9ponds par un seul objet JSON, sans balises markdown, cl\u00e9s exactement :\n"
             '{"summary": string, "summary_bullets": array of strings, "details": string, "answer_in_context": boolean}\n'
-            "summary : 2–4 phrases. summary_bullets : 3–8 points courts. "
-            "details : synthèse structurée en citant les sources [1], [2], etc. "
-            "Rédige tout en français."
+            "summary : 2\u20134 phrases. summary_bullets : 3\u20138 points courts. "
+            "details : synth\u00e8se structur\u00e9e en citant les sources [1], [2], etc. "
+            "R\u00e9dige tout en fran\u00e7ais."
         )
         user = f"Question utilisateur :\n{user_query}\n\nCONTEXT :\n{numbered_context}"
+
 
     raw = invoke_llm(
         provider,
