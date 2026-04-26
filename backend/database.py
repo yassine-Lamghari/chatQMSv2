@@ -57,15 +57,30 @@ class DocumentTemplate(Base):
     body = Column(Text)
 
 
+class ActivityLog(Base):
+    """Audit trail: one row per user query."""
+    __tablename__ = "activity_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, nullable=False, default="anonymous")
+    action = Column(String, nullable=False)          # chat | search | audit | pfmea | upload | delete
+    query = Column(Text, nullable=True)              # user query text
+    document_ids = Column(String, nullable=True)     # comma-separated doc IDs used
+    confidence = Column(String, nullable=True)       # High/Medium/Low
+    language_mode = Column(String, nullable=True)
+    response_summary = Column(Text, nullable=True)   # first 300 chars of answer
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
 def migrate_sqlite_schema():
     """Lightweight migrations for SQLite (add columns if missing)."""
     insp = inspect(engine)
-    if not insp.has_table("document_metadata"):
-        return
-    cols = {c["name"] for c in insp.get_columns("document_metadata")}
-    with engine.begin() as conn:
-        if "site" not in cols:
-            conn.execute(text("ALTER TABLE document_metadata ADD COLUMN site VARCHAR DEFAULT 'default'"))
+    # document_metadata migrations
+    if insp.has_table("document_metadata"):
+        cols = {c["name"] for c in insp.get_columns("document_metadata")}
+        with engine.begin() as conn:
+            if "site" not in cols:
+                conn.execute(text("ALTER TABLE document_metadata ADD COLUMN site VARCHAR DEFAULT 'default'"))
+    # activity_logs — created automatically by create_all but column guard just in case
 
 
 def seed_default_templates(db):

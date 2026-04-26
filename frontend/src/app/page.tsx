@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const CHAT_HISTORY_KEY = "qms_chat_history";
@@ -228,6 +229,7 @@ export default function Chatbot() {
           respond_in_english: respondInEnglish,
           response_locale: responseLocale,
           user_role: user.role,
+          username: user.username,
           filters,
         }),
       });
@@ -278,8 +280,27 @@ export default function Chatbot() {
           {lbl.newChat}
         </button>
 
+        {/* ── Quick Access Tools ── */}
+        <div style={{ padding: "8px 8px 4px" }}>
+          <p className="sidebar-section-label" style={{ paddingTop: "6px" }}>
+            {uiLocale === "en" ? "Tools" : "Outils"}
+          </p>
+          <Link href="/audit" className="sidebar-tool-link" id="nav-audit">
+            <span className="sidebar-tool-icon">🗂</span>
+            <span>{uiLocale === "en" ? "QMS Audit Assistant" : "Assistant Audit QMS"}</span>
+          </Link>
+          <Link href="/logs" className="sidebar-tool-link" id="nav-logs">
+            <span className="sidebar-tool-icon">📋</span>
+            <span>{uiLocale === "en" ? "Activity Logs" : "Logs d'activité"}</span>
+          </Link>
+          <Link href="/pfmea" className="sidebar-tool-link" id="nav-pfmea">
+            <span className="sidebar-tool-icon">🔧</span>
+            <span>{uiLocale === "en" ? "PFMEA Generator" : "Générateur PFMEA"}</span>
+          </Link>
+        </div>
+
         {/* History */}
-        <div style={{ flex: 1, overflowY: "auto", marginTop: "8px" }}>
+        <div style={{ flex: 1, overflowY: "auto", marginTop: "4px" }}>
           {sessions.length > 0 && (
             <>
               <p className="sidebar-section-label">{lbl.recent}</p>
@@ -401,6 +422,22 @@ export default function Chatbot() {
                 <div className="welcome-logo claude-icon" style={{ width: 56, height: 56, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, color: "white", fontWeight: 700 }}>Q</div>
                 <h2>{lbl.welcome}</h2>
                 <p>{lbl.welcomeSub}</p>
+                
+                {/* ── Action Cards ── */}
+                <div className="welcome-actions">
+                  <Link href="/audit" className="welcome-action-card">
+                    <span className="welcome-action-icon">🗂</span>
+                    <span className="welcome-action-text">{uiLocale === "en" ? "QMS Audit Assistant" : "Assistant Audit QMS"}</span>
+                  </Link>
+                  <Link href="/logs" className="welcome-action-card">
+                    <span className="welcome-action-icon">📋</span>
+                    <span className="welcome-action-text">{uiLocale === "en" ? "Activity Logs" : "Logs d'activité"}</span>
+                  </Link>
+                  <Link href="/pfmea" className="welcome-action-card">
+                    <span className="welcome-action-icon">🔧</span>
+                    <span className="welcome-action-text">{uiLocale === "en" ? "PFMEA Generator" : "Générateur PFMEA"}</span>
+                  </Link>
+                </div>
               </div>
             ) : (
               messages.map((msg, i) => (

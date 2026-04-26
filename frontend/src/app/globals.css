@@ -102,6 +102,34 @@ body {
 .sidebar-item:hover { background: var(--color-sidebar-hover); color: #d4cfc6; }
 .sidebar-item.active { background: var(--color-sidebar-active); color: #f0ece5; }
 
+/* Quick Access Tools */
+.sidebar-tool-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: #9d9990;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.12s, color 0.12s;
+  margin-bottom: 2px;
+}
+.sidebar-tool-link:hover {
+  background: var(--color-sidebar-hover);
+  color: var(--color-accent);
+}
+.sidebar-tool-icon {
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+}
+
 .sidebar-footer {
   margin-top: auto;
   border-top: 1px solid var(--color-border-dark);
@@ -248,6 +276,41 @@ body {
   font-size: 15px;
   color: var(--color-text-muted);
   max-width: 420px;
+}
+
+.welcome-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.welcome-action-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 12px 18px;
+  text-decoration: none;
+  color: var(--color-text);
+  font-size: 14.5px;
+  font-weight: 500;
+  transition: all 0.15s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+}
+
+.welcome-action-card:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  transform: translateY(-2px);
+  color: var(--color-accent);
+}
+
+.welcome-action-icon {
+  font-size: 18px;
 }
 
 /* Message rows */

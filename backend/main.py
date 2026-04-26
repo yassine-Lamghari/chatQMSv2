@@ -11,6 +11,7 @@ from database import (
     DocumentMetadata,
     DocumentTemplate,
     AppSetting,
+    ActivityLog,
     seed_default_templates,
 )
 from pydantic import BaseModel
@@ -42,6 +43,34 @@ from llm_rag import build_numbered_context, synthesize_from_context
 
 os.makedirs("uploads", exist_ok=True)
 
+
+def _log_activity(
+    db: Session,
+    action: str,
+    username: str = "anonymous",
+    query: str | None = None,
+    document_ids: list[str] | None = None,
+    confidence: str | None = None,
+    language_mode: str | None = None,
+    response_summary: str | None = None,
+):
+    """Insert an activity log entry (non-blocking best-effort)."""
+    try:
+        entry = ActivityLog(
+            username=username,
+            action=action,
+            query=(query or "")[:500],
+            document_ids=",".join(document_ids) if document_ids else None,
+            confidence=confidence,
+            language_mode=language_mode,
+            response_summary=(response_summary or "")[:300],
+        )
+        db.add(entry)
+        db.commit()
+    except Exception as _e:
+        logger.warning("ActivityLog write failed: %s", _e)
+        db.rollback()
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
         return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
@@ -71,6 +100,7 @@ class ChatRequest(BaseModel):
     filters: dict = {}
     # When True (default), call the active LLM to synthesize summary/details from retrieved chunks.
     use_llm: bool = True
+    username: str = "anonymous"   # passed from frontend for activity logging
 
 class ChatSource(BaseModel):
     filename: str
@@ -585,7 +615,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         )
         details_body = f"{syn_intro}\n\n{rag_synthesis}\n\n---\n\n{detail_intro}\n\n{combined_context}"
 
-    return {
+    result = {
         "summary": summary_text,
         "summary_bullets": summary_bullets,
         "details": details_body,
@@ -595,6 +625,20 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         "rag_synthesis": rag_synthesis,
         "generation_mode": generation_mode,
     }
+
+    # Activity log
+    _log_activity(
+        db,
+        action="chat",
+        username=payload.username,
+        query=query,
+        document_ids=[s["doc_id"] for s in unique_sources],
+        confidence=confidence,
+        language_mode=language_mode,
+        response_summary=summary_text,
+    )
+
+    return result
 
 @app.post("/api/search")
 def semantic_search(payload: SearchRequest, db: Session = Depends(get_db)):
@@ -939,7 +983,7 @@ def upload_document(
         "uploaded_at": new_doc.uploaded_at.isoformat() if new_doc.uploaded_at else "",
     }
     background_tasks.add_task(ingest_document, file_path, new_doc.id, metadata)
-    
+    _log_activity(db, action="upload", username="admin", query=file.filename, response_summary=f"doc_id={new_doc.id} type={doc_type}")
     return new_doc
 
 @app.delete("/api/documents/{doc_id}")
@@ -963,4 +1007,37 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
         
     db.delete(doc)
     db.commit()
+    _log_activity(db, action="delete", username="admin", query=doc.filename, response_summary=f"doc_id={doc_id} deleted")
     return {"message": "Document deleted"}
+
+
+# --- Activity Logs Endpoint ---
+
+@app.get("/api/logs")
+def get_activity_logs(
+    limit: int = 100,
+    action: str | None = None,
+    username: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """Returns activity logs for admin dashboard (newest first)."""
+    q = db.query(ActivityLog)
+    if action:
+        q = q.filter(ActivityLog.action == action)
+    if username:
+        q = q.filter(ActivityLog.username == username)
+    logs = q.order_by(ActivityLog.created_at.desc()).limit(max(1, min(limit, 500))).all()
+    return [
+        {
+            "id": log.id,
+            "username": log.username,
+            "action": log.action,
+            "query": log.query,
+            "document_ids": log.document_ids,
+            "confidence": log.confidence,
+            "language_mode": log.language_mode,
+            "response_summary": log.response_summary,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        }
+        for log in logs
+    ]

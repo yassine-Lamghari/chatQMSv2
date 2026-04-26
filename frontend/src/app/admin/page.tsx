@@ -19,6 +19,11 @@ export default function AdminInterface() {
   const [user, setUser] = useState<{username: string, role: string} | null>(null);
   const router = useRouter();
 
+  // ── Logs state ──────────────────────────────────────────────────
+  const [logs, setLogs]           = useState<any[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsFilter, setLogsFilter]   = useState("");
+
   const [usersList, setUsersList] = useState<any[]>([]);
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'user' });
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -53,6 +58,8 @@ export default function AdminInterface() {
       fetchDocuments();
     } else if (activeTab === "config") {
       fetchLlmConfig();
+    } else if (activeTab === "logs") {
+      fetchLogs();
     }
   }, [activeTab]);
 
@@ -75,6 +82,20 @@ export default function AdminInterface() {
   const handleExportAudit = (fmt: "docx" | "pdf") => {
     const params = new URLSearchParams({ standard: auditStandard, process: auditProcess, format: fmt });
     window.open(`${API_BASE_URL}/api/audit/export?${params}`, "_blank");
+  };
+
+  const fetchLogs = async () => {
+    setLogsLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "200" });
+      if (logsFilter.trim()) params.set("action", logsFilter.trim());
+      const res = await fetch(`${API_BASE_URL}/api/logs?${params}`);
+      if (res.ok) setLogs(await res.json());
+    } catch (e) {
+      console.error("Failed to fetch logs", e);
+    } finally {
+      setLogsLoading(false);
+    }
   };
 
   const fetchLlmConfig = async () => {
@@ -301,19 +322,19 @@ export default function AdminInterface() {
             onClick={() => setActiveTab("config")}
             className={`text-left px-4 py-2 rounded-lg transition ${activeTab === "config" ? "bg-blue-600/20 text-blue-400" : "hover:bg-slate-700 text-slate-300"}`}
           >
-            Configuration LLM
+            ⚙ Configuration LLM
           </button>
           <button 
             onClick={() => setActiveTab("docs")}
             className={`text-left px-4 py-2 rounded-lg transition ${activeTab === "docs" ? "bg-blue-600/20 text-blue-400" : "hover:bg-slate-700 text-slate-300"}`}
           >
-            Gestion des Documents (RAG)
+            📄 Documents (RAG)
           </button>
           <button 
             onClick={() => setActiveTab("users")}
             className={`text-left px-4 py-2 rounded-lg transition ${activeTab === "users" ? "bg-blue-600/20 text-blue-400" : "hover:bg-slate-700 text-slate-300"}`}
           >
-            Utilisateurs
+            👥 Utilisateurs
           </button>
           <button
             onClick={() => setActiveTab("audit")}
@@ -321,6 +342,18 @@ export default function AdminInterface() {
           >
             🗂 Assistant Audit QMS
           </button>
+          <button
+            onClick={() => setActiveTab("logs")}
+            className={`text-left px-4 py-2 rounded-lg transition ${activeTab === "logs" ? "bg-emerald-600/20 text-emerald-400" : "hover:bg-slate-700 text-slate-300"}`}
+          >
+            📋 Logs d'activité
+          </button>
+          <Link
+            href="/pfmea"
+            className="text-left px-4 py-2 rounded-lg transition hover:bg-slate-700 text-slate-300 flex items-center gap-2"
+          >
+            🔧 Générateur PFMEA
+          </Link>
         </div>
 
         <div className="mt-auto border-t border-slate-700 pt-4">
@@ -790,6 +823,140 @@ export default function AdminInterface() {
                 )}
               </>
             )}
+          </div>
+        )}
+
+        {/* ── LOGS D'ACTIVITÉ ── */}
+        {activeTab === "logs" && (
+          <div className="max-w-6xl space-y-6">
+            {/* Header + filters */}
+            <div className="bg-[#1e293b] border border-slate-700 rounded-2xl p-6 shadow-lg">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-xl font-semibold">📋 Logs d'activité</h3>
+                  <p className="text-slate-400 text-sm mt-1">Traçabilité complète — qui a fait quoi et quand.</p>
+                </div>
+                <button
+                  onClick={fetchLogs}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-4 py-2 text-sm transition"
+                >
+                  🔄 Actualiser
+                </button>
+              </div>
+
+              {/* Stats */}
+              {logs.length > 0 && (() => {
+                const counts: Record<string, number> = {};
+                logs.forEach(l => { counts[l.action] = (counts[l.action] || 0) + 1; });
+                const colors: Record<string, string> = { chat:"blue", upload:"emerald", delete:"red", audit:"amber", search:"purple" };
+                return (
+                  <div className="flex flex-wrap gap-3 mb-4">
+                    {Object.entries(counts).map(([action, count]) => (
+                      <span key={action} className={`text-xs font-semibold px-3 py-1 rounded-full bg-${colors[action] || "slate"}-500/20 text-${colors[action] || "slate"}-400 border border-${colors[action] || "slate"}-500/30`}>
+                        {action} × {count}
+                      </span>
+                    ))}
+                    <span className="text-xs text-slate-500 ml-auto self-center">{logs.length} entrées</span>
+                  </div>
+                );
+              })()}
+
+              {/* Filter */}
+              <div className="flex gap-3">
+                <select
+                  value={logsFilter}
+                  onChange={e => setLogsFilter(e.target.value)}
+                  className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="">Toutes les actions</option>
+                  <option value="chat">Chat</option>
+                  <option value="upload">Upload</option>
+                  <option value="delete">Supprimer</option>
+                  <option value="audit">Audit</option>
+                  <option value="search">Recherche</option>
+                </select>
+                <button onClick={fetchLogs} className="bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm px-4 py-2 rounded-lg transition">
+                  Filtrer
+                </button>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="bg-[#1e293b] border border-slate-700 rounded-2xl shadow-lg overflow-hidden">
+              {logsLoading ? (
+                <div className="p-8 text-center text-slate-400">Chargement des logs…</div>
+              ) : logs.length === 0 ? (
+                <div className="p-8 text-center text-slate-500">Aucun log trouvé. Les logs s'accumulent au fur et à mesure des interactions.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-800/60 text-slate-400">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Date/Heure</th>
+                        <th className="px-4 py-3 text-left">Utilisateur</th>
+                        <th className="px-4 py-3 text-left">Action</th>
+                        <th className="px-4 py-3 text-left">Requête</th>
+                        <th className="px-4 py-3 text-left">Confiance</th>
+                        <th className="px-4 py-3 text-left">Résumé réponse</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-700/40">
+                      {logs.map((log: any) => {
+                        const actionColors: Record<string, string> = {
+                          chat: "bg-blue-500/20 text-blue-400",
+                          upload: "bg-emerald-500/20 text-emerald-400",
+                          delete: "bg-red-500/20 text-red-400",
+                          audit: "bg-amber-500/20 text-amber-400",
+                          search: "bg-purple-500/20 text-purple-400",
+                        };
+                        const confColors: Record<string, string> = {
+                          "Élevé": "text-emerald-400", "High": "text-emerald-400",
+                          "Moyen": "text-yellow-400", "Medium": "text-yellow-400",
+                          "Faible": "text-red-400", "Low": "text-red-400",
+                        };
+                        const dt = log.created_at ? new Date(log.created_at) : null;
+                        return (
+                          <tr key={log.id} className="hover:bg-slate-800/30 transition">
+                            <td className="px-4 py-3 whitespace-nowrap text-slate-400 text-xs">
+                              {dt ? (
+                                <>
+                                  <span className="text-slate-300">{dt.toLocaleDateString("fr-FR")}</span>
+                                  <br/>
+                                  <span>{dt.toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit", second:"2-digit" })}</span>
+                                </>
+                              ) : "—"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="font-medium text-slate-200">{log.username || "—"}</span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`text-xs font-semibold px-2 py-1 rounded-full ${actionColors[log.action] || "bg-slate-700 text-slate-300"}`}>
+                                {log.action}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 max-w-xs">
+                              <span className="text-slate-300 text-xs truncate block max-w-[200px]" title={log.query}>
+                                {log.query || "—"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`text-xs font-semibold ${confColors[log.confidence] || "text-slate-400"}`}>
+                                {log.confidence || "—"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 max-w-sm">
+                              <span className="text-slate-400 text-xs line-clamp-2" title={log.response_summary}>
+                                {log.response_summary || "—"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

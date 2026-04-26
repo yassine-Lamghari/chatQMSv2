@@ -17,3 +17,6 @@ docx2txt
 pypdf
 python-docx
 fpdf2
+openpyxl
+python-pptx
+bcrypt

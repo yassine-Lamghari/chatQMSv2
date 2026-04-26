@@ -5,6 +5,7 @@ from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
+from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ EMBEDDING_MODEL_NAME = os.getenv(
 # normalize pour une similarité cosinus correcte
 EMBEDDING_ENCODE_KWARGS = {"normalize_embeddings": True}
 
-SUPPORTED_EXTENSIONS = {".pdf", ".doc", ".docx"}
+SUPPORTED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xlsx", ".xls", ".pptx", ".ppt"}
 
 # Lazy singletons (avoid loading heavy models at import time during tooling)
 _embeddings = None
@@ -66,21 +67,72 @@ def _ce_score_to_distance(score: float) -> float:
     return 3.0 * (1.0 - rel)
 
 
+def _load_excel(file_path: str) -> list[Document]:
+    """Load an Excel workbook — each sheet becomes a document."""
+    try:
+        import openpyxl
+    except ImportError:
+        raise RuntimeError("openpyxl not installed. Run: pip install openpyxl")
+    wb = openpyxl.load_workbook(file_path, data_only=True)
+    docs: list[Document] = []
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        rows: list[str] = []
+        for row in ws.iter_rows(values_only=True):
+            cells = [str(c) if c is not None else "" for c in row]
+            line = "\t".join(cells).strip()
+            if line:
+                rows.append(line)
+        if rows:
+            docs.append(Document(
+                page_content="\n".join(rows),
+                metadata={"sheet": sheet_name},
+            ))
+    return docs
+
+
+def _load_pptx(file_path: str) -> list[Document]:
+    """Load a PowerPoint presentation — each slide becomes a document."""
+    try:
+        from pptx import Presentation
+    except ImportError:
+        raise RuntimeError("python-pptx not installed. Run: pip install python-pptx")
+    prs = Presentation(file_path)
+    docs: list[Document] = []
+    for i, slide in enumerate(prs.slides, start=1):
+        texts: list[str] = []
+        for shape in slide.shapes:
+            if hasattr(shape, "text") and shape.text.strip():
+                texts.append(shape.text.strip())
+        if texts:
+            docs.append(Document(
+                page_content="\n".join(texts),
+                metadata={"slide": i},
+            ))
+    return docs
+
+
 def ingest_document(file_path: str, doc_id: int, metadata: dict):
     """
     Extracts text from a document, chunks it, and adds it to the vector store.
+    Supports: PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT.
     """
     _, ext = os.path.splitext(file_path)
     ext = ext.lower()
 
     if ext == ".pdf":
         loader = PyPDFLoader(file_path)
+        documents = loader.load()
     elif ext in [".docx", ".doc"]:
         loader = Docx2txtLoader(file_path)
+        documents = loader.load()
+    elif ext in [".xlsx", ".xls"]:
+        documents = _load_excel(file_path)
+    elif ext in [".pptx", ".ppt"]:
+        documents = _load_pptx(file_path)
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
 
-    documents = loader.load()
 
     for doc in documents:
         doc.metadata.update(metadata)
