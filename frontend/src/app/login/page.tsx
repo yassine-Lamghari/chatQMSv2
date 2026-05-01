@@ -25,6 +25,7 @@ export default function Login() {
       const data = await res.json();
       if (!res.ok) { setError(data.detail || "Identifiants incorrects"); return; }
       localStorage.setItem("user", JSON.stringify({ username: data.username, role: data.role }));
+      if (data.token) localStorage.setItem("token", data.token);
       router.push(data.role === "admin" ? "/admin" : "/");
     } catch {
       setError("Impossible de joindre le serveur.");

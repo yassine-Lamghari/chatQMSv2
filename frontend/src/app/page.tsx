@@ -13,6 +13,7 @@ type ChatMeta = {
   details?: string;
   detail_sections?: { section_ref: string; excerpt: string; filename?: string; page?: number }[];
   confidence?: string;
+  confidence_score?: number;
   sources?: { filename?: string; section_ref?: string; relevance?: number }[];
   rag_synthesis?: string | null;
   generation_mode?: string;
@@ -55,6 +56,20 @@ function L(uiLocale: string) {
     thinking:     en ? "Thinking…"           : "Réflexion…",
     errBackend:   en ? "Server error — please try again." : "Erreur serveur — réessayez.",
   };
+}
+
+function ConfidenceBar({ score }: { score?: number }) {
+  if (score === undefined) return null;
+  const pct = Math.round(score * 100);
+  const color = score >= 0.7 ? "#22c55e" : score >= 0.45 ? "#f59e0b" : "#ef4444";
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:4 }}>
+      <div style={{ flex:1, height:4, background:"var(--color-border)", borderRadius:2 }}>
+        <div style={{ width:`${pct}%`, height:"100%", background:color, borderRadius:2, transition:"width 0.4s" }} />
+      </div>
+      <span style={{ fontSize:11, color:"var(--color-text-faint)", minWidth:32 }}>{pct}%</span>
+    </div>
+  );
 }
 
 function AssistantBody({ msg, view, locale }: { msg: ChatMessage; view: "summary" | "detail"; locale: string }) {
@@ -113,6 +128,7 @@ function AssistantBody({ msg, view, locale }: { msg: ChatMessage; view: "summary
         <span>{lbl.src}: {meta.sources?.length ?? 0}</span>
         {meta.generation_mode && <span>· {meta.generation_mode === "llm" ? "RAG + LLM" : "RAG"}</span>}
       </div>
+      <ConfidenceBar score={meta.confidence_score} />
     </div>
   );
 }
@@ -123,7 +139,6 @@ export default function Chatbot() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [input, setInput]                 = useState("");
   const [isLoading, setIsLoading]         = useState(false);
-  // languageMode: only two options remain (document_language removed).
   const [languageMode, setLanguageMode]   = useState<"en_only" | "fr_with_en_sources">("fr_with_en_sources");
   const [uiLocale, setUiLocale]           = useState<"fr" | "en">("fr");
   const [chatView, setChatView]           = useState<"summary" | "detail">("summary");
@@ -133,6 +148,7 @@ export default function Chatbot() {
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo]   = useState("");
   const [user, setUser]                   = useState<{ username: string; role: string } | null>(null);
+  const [activeLLM, setActiveLLM]         = useState<string | null>(null);
   const router   = useRouter();
   const bottomRef = useRef<HTMLDivElement>(null);
   const lbl = L(uiLocale);
@@ -143,12 +159,37 @@ export default function Chatbot() {
     const parsed = JSON.parse(stored);
     if (parsed.role === "admin") { router.push("/admin"); return; }
     setUser(parsed);
-    const storedSessions = localStorage.getItem(CHAT_HISTORY_KEY);
-    if (storedSessions) {
-      const parsed2: ChatSession[] = JSON.parse(storedSessions);
-      setSessions(parsed2);
-      if (parsed2.length > 0) { setActiveSessionId(parsed2[0].id); setMessages(parsed2[0].messages); }
-    }
+    // Load sessions from DB
+    fetch(`${API_BASE_URL}/api/sessions?username=${encodeURIComponent(parsed.username)}`)
+      .then(r => r.ok ? r.json() : [])
+      .then((dbSessions: ChatSession[]) => {
+        if (dbSessions.length > 0) {
+          setSessions(dbSessions);
+          setActiveSessionId(dbSessions[0].id);
+          setMessages(dbSessions[0].messages);
+        } else {
+          // fallback: localStorage
+          const storedSessions = localStorage.getItem(CHAT_HISTORY_KEY);
+          if (storedSessions) {
+            const parsed2: ChatSession[] = JSON.parse(storedSessions);
+            setSessions(parsed2);
+            if (parsed2.length > 0) { setActiveSessionId(parsed2[0].id); setMessages(parsed2[0].messages); }
+          }
+        }
+      })
+      .catch(() => {
+        const storedSessions = localStorage.getItem(CHAT_HISTORY_KEY);
+        if (storedSessions) {
+          const parsed2: ChatSession[] = JSON.parse(storedSessions);
+          setSessions(parsed2);
+          if (parsed2.length > 0) { setActiveSessionId(parsed2[0].id); setMessages(parsed2[0].messages); }
+        }
+      });
+    // Load active LLM
+    fetch(`${API_BASE_URL}/api/config/active`)
+      .then(r => r.ok ? r.json() : {})
+      .then(d => setActiveLLM(d?.provider || null))
+      .catch(() => {});
   }, [router]);
 
   useEffect(() => {
@@ -160,6 +201,14 @@ export default function Chatbot() {
     localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(next));
   };
 
+  const persistSessionToDb = (session: ChatSession, username: string) => {
+    fetch(`${API_BASE_URL}/api/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: session.id, title: session.title, messages: session.messages, username }),
+    }).catch(() => {});
+  };
+
   const updateCurrentSession = (nextMsgs: ChatMessage[]) => {
     const title = nextMsgs.find(m => m.role === "user")?.content?.slice(0, 40) || lbl.newChat;
     if (!activeSessionId) {
@@ -167,13 +216,15 @@ export default function Chatbot() {
       const s: ChatSession = { id, title, messages: nextMsgs, updatedAt: new Date().toISOString() };
       setActiveSessionId(id);
       persistSessions([s, ...sessions].slice(0, 20));
+      if (user) persistSessionToDb(s, user.username);
       return;
     }
-    persistSessions(
-      sessions
-        .map(s => s.id === activeSessionId ? { ...s, messages: nextMsgs, title, updatedAt: new Date().toISOString() } : s)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    );
+    const updated = sessions
+      .map(s => s.id === activeSessionId ? { ...s, messages: nextMsgs, title, updatedAt: new Date().toISOString() } : s)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    persistSessions(updated);
+    const found = updated.find(s => s.id === activeSessionId);
+    if (found && user) persistSessionToDb(found, user.username);
   };
 
   const startNewChat = () => {
@@ -241,7 +292,8 @@ export default function Chatbot() {
       const meta: ChatMeta = {
         summary: data.summary, summary_bullets: data.summary_bullets,
         details: data.details, detail_sections: data.detail_sections,
-        confidence: data.confidence, sources: data.sources,
+        confidence: data.confidence, confidence_score: data.confidence_score,
+        sources: data.sources,
         rag_synthesis: data.rag_synthesis ?? null, generation_mode: data.generation_mode,
       };
       const content = `${data.summary || ""}\n\n${(data.summary_bullets || []).join("\n")}\n\n${data.details || ""}`;
@@ -249,9 +301,13 @@ export default function Chatbot() {
       const next = [...nextUser, aiMsg];
       setMessages(next);
       updateCurrentSession(next);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Chat request failed", e);
-      const next = [...nextUser, { role: "assistant", content: lbl.errBackend }];
+      let errMsg = lbl.errBackend;
+      if (e?.message?.includes("401")) errMsg = uiLocale === "en" ? "API key not configured — check admin settings." : "Clé API non configurée — vérifiez les paramètres admin.";
+      else if (e?.message?.includes("404")) errMsg = uiLocale === "en" ? "No documents indexed yet. Upload files from admin." : "Aucun document indexé. Importez des fichiers depuis l'admin.";
+      else if (e?.message?.includes("429")) errMsg = uiLocale === "en" ? "Too many requests — please wait a moment." : "Trop de requêtes — attendez un instant.";
+      const next = [...nextUser, { role: "assistant", content: errMsg }];
       setMessages(next);
       updateCurrentSession(next);
     } finally {
@@ -289,13 +345,13 @@ export default function Chatbot() {
             <span className="sidebar-tool-icon">🗂</span>
             <span>{uiLocale === "en" ? "QMS Audit Assistant" : "Assistant Audit QMS"}</span>
           </Link>
-          <Link href="/logs" className="sidebar-tool-link" id="nav-logs">
-            <span className="sidebar-tool-icon">📋</span>
-            <span>{uiLocale === "en" ? "Activity Logs" : "Logs d'activité"}</span>
-          </Link>
           <Link href="/pfmea" className="sidebar-tool-link" id="nav-pfmea">
             <span className="sidebar-tool-icon">🔧</span>
             <span>{uiLocale === "en" ? "PFMEA Generator" : "Générateur PFMEA"}</span>
+          </Link>
+          <Link href="/search" className="sidebar-tool-link" id="nav-search">
+            <span className="sidebar-tool-icon">🔍</span>
+            <span>{uiLocale === "en" ? "Semantic Search" : "Recherche sémantique"}</span>
           </Link>
         </div>
 
@@ -388,9 +444,9 @@ export default function Chatbot() {
             </button>
           </div>
 
-          {/* Model badge */}
+          {/* Model badge — dynamic */}
           <span style={{ fontSize: "12px", color: "var(--color-text-faint)", background: "var(--color-bg-subtle)", padding: "4px 10px", borderRadius: "20px", border: "1px solid var(--color-border)" }}>
-            Groq · llama-3.1-8b
+            {activeLLM ? activeLLM.charAt(0).toUpperCase() + activeLLM.slice(1) : "RAG"} · QMS
           </span>
         </header>
 
@@ -428,10 +484,6 @@ export default function Chatbot() {
                   <Link href="/audit" className="welcome-action-card">
                     <span className="welcome-action-icon">🗂</span>
                     <span className="welcome-action-text">{uiLocale === "en" ? "QMS Audit Assistant" : "Assistant Audit QMS"}</span>
-                  </Link>
-                  <Link href="/logs" className="welcome-action-card">
-                    <span className="welcome-action-icon">📋</span>
-                    <span className="welcome-action-text">{uiLocale === "en" ? "Activity Logs" : "Logs d'activité"}</span>
                   </Link>
                   <Link href="/pfmea" className="welcome-action-card">
                     <span className="welcome-action-icon">🔧</span>

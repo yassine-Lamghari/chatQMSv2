@@ -1,6 +1,9 @@
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Query
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Query, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy.orm import Session
 from database import (
     init_db,
@@ -12,6 +15,7 @@ from database import (
     DocumentTemplate,
     AppSetting,
     ActivityLog,
+    ChatSession,
     seed_default_templates,
 )
 from pydantic import BaseModel
@@ -22,7 +26,8 @@ import json
 import io
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
+from auth import create_access_token, decode_access_token
 from rag import (
     ingest_document,
     remove_document_from_index,
@@ -39,7 +44,9 @@ from services_qms import (
     pfmea_skeleton_rows,
     verify_pfmea_row,
 )
-from llm_rag import build_numbered_context, synthesize_from_context
+from llm_rag import build_numbered_context, synthesize_from_context, generate_pfmea_rows_llm
+
+limiter = Limiter(key_func=get_remote_address)
 
 os.makedirs("uploads", exist_ok=True)
 
@@ -169,22 +176,39 @@ class LLMProviderConfigRequest(BaseModel):
     base_url: str | None = None
 
 app = FastAPI(title="QMS Chatbot API")
-# Chroma similarity_search_with_score returns distances (lower = closer).
-# These defaults are intentionally permissive so valid in-doc answers are not rejected;
-# tighten them if you get too many weak matches.
-# Tuned for vector + cross-encoder blend (see rag.search_similar_chunks).
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 MAX_DISTANCE_THRESHOLD = 2.35
-# relevance = exp(-distance); after reranking, best chunks are usually < 1.0 pseudo-distance.
 MIN_RELEVANCE_THRESHOLD = 0.12
 
-# Configure CORS
+_ALLOWED_ORIGINS = os.getenv("FRONTEND_URL", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, restrict to frontend URL
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Dependency: optional JWT auth (non-blocking for existing endpoints) ──
+def get_optional_user(authorization: Optional[str] = Header(None)) -> dict | None:
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization[7:]
+    return decode_access_token(token)
+
+def require_auth(authorization: Optional[str] = Header(None)) -> dict:
+    user = get_optional_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+def require_admin(authorization: Optional[str] = Header(None)) -> dict:
+    user = require_auth(authorization)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
 
 @app.on_event("startup")
 def on_startup():
@@ -621,12 +645,12 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         "details": details_body,
         "detail_sections": detail_sections[:8],
         "confidence": confidence,
+        "confidence_score": round(confidence_score, 3),
         "sources": unique_sources,
         "rag_synthesis": rag_synthesis,
         "generation_mode": generation_mode,
     }
 
-    # Activity log
     _log_activity(
         db,
         action="chat",
@@ -701,13 +725,36 @@ def list_templates(db: Session = Depends(get_db)):
 def generate_pfmea(payload: PfmeaGenerateRequest, db: Session = Depends(get_db)):
     q = f"PFMEA failure mode process {payload.process} product {payload.product} defects {payload.known_defects}"
     hits = search_similar_chunks(query=q, k=max(1, min(payload.top_k, 8)))
-    excerpts = [d.page_content.strip() for d, _ in hits[:3] if d.page_content]
-    rows = pfmea_skeleton_rows(payload.process, payload.product, payload.known_defects, excerpts)
+    excerpts = [d.page_content.strip() for d, _ in hits if d.page_content]
+
+    # Try LLM enrichment
+    active_p, api_k, base_u, ollama_m = _active_llm_settings(db)
+    can_llm = bool(active_p and (active_p == "ollama" or (api_k and len(api_k) > 0)))
+
+    rows = None
+    if can_llm:
+        refs = [f"Source {i+1}" for i in range(len(hits))]
+        numbered = build_numbered_context(refs, excerpts, payload.top_k)
+        rows = generate_pfmea_rows_llm(
+            provider=active_p,
+            api_key=api_k,
+            base_url=base_u,
+            ollama_model=ollama_m,
+            process=payload.process,
+            product=payload.product,
+            known_defects=payload.known_defects,
+            numbered_context=numbered,
+            respond_english=False,
+        )
+
+    if not rows:
+        rows = pfmea_skeleton_rows(payload.process, payload.product, payload.known_defects, excerpts[:3])
+
     tpl = db.query(DocumentTemplate).filter(DocumentTemplate.key == "pfmea_blank").first()
     return {
         "template": tpl.key if tpl else None,
         "rows": rows,
-        "rag_excerpts_used": excerpts,
+        "rag_excerpts_used": excerpts[:payload.top_k],
     }
 
 
@@ -894,8 +941,8 @@ def login_user(user: UserLogin, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.username == user.username).first()
     if not db_user or not verify_password(user.password, db_user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
-    
-    return {"message": "Login successful", "username": db_user.username, "role": db_user.role}
+    token = create_access_token({"sub": db_user.username, "role": db_user.role, "site": db_user.site or "default"})
+    return {"message": "Login successful", "username": db_user.username, "role": db_user.role, "token": token}
 
 # --- User Management Endpoints ---
 
@@ -1020,7 +1067,6 @@ def get_activity_logs(
     username: str | None = None,
     db: Session = Depends(get_db),
 ):
-    """Returns activity logs for admin dashboard (newest first)."""
     q = db.query(ActivityLog)
     if action:
         q = q.filter(ActivityLog.action == action)
@@ -1035,9 +1081,195 @@ def get_activity_logs(
             "query": log.query,
             "document_ids": log.document_ids,
             "confidence": log.confidence,
+            "confidence_score": log.confidence_score,
             "language_mode": log.language_mode,
             "response_summary": log.response_summary,
             "created_at": log.created_at.isoformat() if log.created_at else None,
         }
         for log in logs
     ]
+
+
+# --- Chat Sessions (persistent, DB-backed) ---
+
+class SessionSaveRequest(BaseModel):
+    session_id: str
+    title: str
+    messages: list
+    username: str
+
+@app.get("/api/sessions")
+def get_sessions(username: str, db: Session = Depends(get_db)):
+    rows = db.query(ChatSession).filter(ChatSession.username == username).order_by(ChatSession.updated_at.desc()).limit(30).all()
+    return [{"id": r.id, "title": r.title, "messages": json.loads(r.messages_json or "[]"), "updatedAt": r.updated_at.isoformat()} for r in rows]
+
+@app.post("/api/sessions")
+def save_session(payload: SessionSaveRequest, db: Session = Depends(get_db)):
+    row = db.query(ChatSession).filter(ChatSession.id == payload.session_id).first()
+    if row:
+        row.title = payload.title[:80]
+        row.messages_json = json.dumps(payload.messages)
+        row.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    else:
+        row = ChatSession(
+            id=payload.session_id,
+            username=payload.username,
+            title=payload.title[:80],
+            messages_json=json.dumps(payload.messages),
+            updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        db.add(row)
+    db.commit()
+    return {"ok": True}
+
+@app.delete("/api/sessions/{session_id}")
+def delete_session(session_id: str, db: Session = Depends(get_db)):
+    row = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if row:
+        db.delete(row)
+        db.commit()
+    return {"ok": True}
+
+
+# --- PFMEA Excel Export ---
+
+@app.post("/api/generate/pfmea/export")
+def export_pfmea_excel(payload: dict, db: Session = Depends(get_db)):
+    """Export PFMEA rows as a formatted Excel file."""
+    try:
+        import openpyxl
+        from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl not installed")
+
+    rows = payload.get("rows", [])
+    process = payload.get("process", "process")
+    product = payload.get("product", "product")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "PFMEA"
+
+    headers = ["#", "Étape process", "Produit", "Mode de défaillance", "Effets", "S", "O", "D", "RPN", "Actions recommandées"]
+    header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+    header_font = Font(color="F1F5F9", bold=True, size=10)
+    thin = Side(style="thin", color="334155")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for col, h in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = border
+
+    ws.row_dimensions[1].height = 24
+    col_widths = [5, 22, 16, 28, 28, 5, 5, 5, 7, 36]
+    for i, w in enumerate(col_widths, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
+    red_fill   = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
+    amber_fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+    green_fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+
+    for ri, row in enumerate(rows, start=2):
+        rpn = int(row.get("rpn", 0) or 0)
+        row_fill = red_fill if rpn > 200 else amber_fill if rpn > 100 else green_fill
+        vals = [row.get("line", ri-1), row.get("process_step", ""), row.get("product", ""),
+                row.get("failure_mode", ""), row.get("effects", ""),
+                row.get("severity", ""), row.get("occurrence", ""), row.get("detection", ""),
+                row.get("rpn", ""), row.get("recommended_actions", "")]
+        for col, val in enumerate(vals, start=1):
+            cell = ws.cell(row=ri, column=col, value=val)
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            cell.border = border
+            if col == 9:  # RPN column
+                cell.fill = row_fill
+                cell.font = Font(bold=True)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"pfmea_{process}_{product}.xlsx".replace(" ", "_")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# --- Stats Dashboard ---
+
+@app.get("/api/stats")
+def get_stats(db: Session = Depends(get_db)):
+    """KPI stats for admin dashboard."""
+    from sqlalchemy import func
+    total_docs = db.query(DocumentMetadata).count()
+    total_users = db.query(User).count()
+    total_queries = db.query(ActivityLog).filter(ActivityLog.action == "chat").count()
+
+    # Queries per day (last 7 days)
+    seven_days_ago = datetime.now(timezone.utc).replace(tzinfo=None)
+    from datetime import timedelta
+    seven_days_ago = seven_days_ago - timedelta(days=7)
+    recent_logs = db.query(ActivityLog).filter(
+        ActivityLog.action == "chat",
+        ActivityLog.created_at >= seven_days_ago
+    ).all()
+
+    daily: dict = {}
+    for log in recent_logs:
+        day = log.created_at.strftime("%Y-%m-%d") if log.created_at else "unknown"
+        daily[day] = daily.get(day, 0) + 1
+
+    # Confidence distribution
+    conf_dist: dict = {}
+    conf_logs = db.query(ActivityLog.confidence, func.count()).filter(
+        ActivityLog.action == "chat", ActivityLog.confidence.isnot(None)
+    ).group_by(ActivityLog.confidence).all()
+    for label, cnt in conf_logs:
+        conf_dist[label] = cnt
+
+    # Top documents used
+    doc_usage: dict = {}
+    logs_with_docs = db.query(ActivityLog.document_ids).filter(ActivityLog.document_ids.isnot(None)).limit(200).all()
+    for (doc_ids,) in logs_with_docs:
+        for did in (doc_ids or "").split(","):
+            did = did.strip()
+            if did:
+                doc_usage[did] = doc_usage.get(did, 0) + 1
+    top_docs_raw = sorted(doc_usage.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_docs = []
+    for did, cnt in top_docs_raw:
+        doc = db.query(DocumentMetadata).filter(DocumentMetadata.id == int(did)).first() if did.isdigit() else None
+        top_docs.append({"doc_id": did, "filename": doc.filename if doc else did, "count": cnt})
+
+    return {
+        "total_documents": total_docs,
+        "total_users": total_users,
+        "total_queries": total_queries,
+        "queries_per_day": daily,
+        "confidence_distribution": conf_dist,
+        "top_documents": top_docs,
+    }
+
+
+# --- Ollama Models List ---
+
+@app.get("/api/ollama/models")
+def get_ollama_models(db: Session = Depends(get_db)):
+    """Fetch available models from local Ollama instance."""
+    import urllib.request, urllib.error
+    cfg = db.query(LLMConfig).filter(LLMConfig.provider == "ollama").first()
+    host = (cfg.base_url.strip() if cfg and cfg.base_url else "") or os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    try:
+        with urllib.request.urlopen(f"{host}/api/tags", timeout=3) as resp:
+            data = json.loads(resp.read())
+            return {"models": [m["name"] for m in data.get("models", [])]}
+    except Exception:
+        return {"models": []}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)

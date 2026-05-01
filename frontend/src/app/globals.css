@@ -554,3 +554,42 @@ body {
   text-align: left;
 }
 .logout-btn:hover { background: rgba(201, 106, 45, 0.12); color: var(--color-accent); }
+
+/* ─── Mobile responsive ─── */
+@media (max-width: 768px) {
+  .sidebar {
+    width: 100%;
+    min-width: unset;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .sidebar-footer { display: none; }
+
+  .chat-main { height: calc(100vh - 60px); }
+
+  .messages-inner { padding: 16px 12px 100px; }
+
+  .topbar { padding: 8px 12px; gap: 6px; }
+
+  .topbar-toggle button { padding: 4px 8px; font-size: 11px; }
+
+  .msg-bubble { max-width: 95%; }
+
+  .input-area { padding: 10px 12px 14px; }
+
+  .filters-panel { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 480px) {
+  .welcome h2 { font-size: 20px; }
+  .welcome-actions { flex-direction: column; align-items: stretch; }
+  .welcome-action-card { justify-content: center; }
+  .topbar-toggle { display: none; }
+}
+

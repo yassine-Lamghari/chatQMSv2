@@ -17,14 +17,16 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
     password_hash = Column(String)
-    role = Column(String, default="user") # admin or user
+    role = Column(String, default="user")  # admin or user
+    site = Column(String, default="default")  # multi-tenant site
 
 class LLMConfig(Base):
     __tablename__ = "llm_configs"
     id = Column(Integer, primary_key=True, index=True)
-    provider = Column(String, unique=True) # groq, gemini, deepseek, ollama
+    provider = Column(String, unique=True)  # groq, gemini, deepseek, ollama
     api_key = Column(String, nullable=True)
     base_url = Column(String, nullable=True)
+    model_name = Column(String, nullable=True)  # e.g. llama3.2 for ollama
 
 class AppSetting(Base):
     __tablename__ = "app_settings"
@@ -38,13 +40,12 @@ class DocumentMetadata(Base):
     filename = Column(String)
     file_path = Column(String)
     doc_type = Column(String)
-    criticality = Column(String) # Low, Med, High
+    criticality = Column(String)  # Low, Med, High
     version = Column(String)
     owner = Column(String)
     language = Column(String)
     site = Column(String, default="default")
     uploaded_at = Column(DateTime, default=datetime.datetime.utcnow)
-
 
 class DocumentTemplate(Base):
     __tablename__ = "document_templates"
@@ -56,31 +57,55 @@ class DocumentTemplate(Base):
     version = Column(String)
     body = Column(Text)
 
-
 class ActivityLog(Base):
     """Audit trail: one row per user query."""
     __tablename__ = "activity_logs"
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, nullable=False, default="anonymous")
-    action = Column(String, nullable=False)          # chat | search | audit | pfmea | upload | delete
-    query = Column(Text, nullable=True)              # user query text
-    document_ids = Column(String, nullable=True)     # comma-separated doc IDs used
-    confidence = Column(String, nullable=True)       # High/Medium/Low
+    action = Column(String, nullable=False)
+    query = Column(Text, nullable=True)
+    document_ids = Column(String, nullable=True)
+    confidence = Column(String, nullable=True)
+    confidence_score = Column(String, nullable=True)  # numeric score
     language_mode = Column(String, nullable=True)
-    response_summary = Column(Text, nullable=True)   # first 300 chars of answer
+    response_summary = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class ChatSession(Base):
+    """Persistent chat session stored in DB per user."""
+    __tablename__ = "chat_sessions"
+    id = Column(String, primary_key=True, index=True)  # UUID
+    username = Column(String, nullable=False, index=True)
+    title = Column(String, default="New chat")
+    messages_json = Column(Text, default="[]")  # JSON array
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
 def migrate_sqlite_schema():
     """Lightweight migrations for SQLite (add columns if missing)."""
     insp = inspect(engine)
-    # document_metadata migrations
-    if insp.has_table("document_metadata"):
-        cols = {c["name"] for c in insp.get_columns("document_metadata")}
-        with engine.begin() as conn:
+    with engine.begin() as conn:
+        # document_metadata
+        if insp.has_table("document_metadata"):
+            cols = {c["name"] for c in insp.get_columns("document_metadata")}
             if "site" not in cols:
                 conn.execute(text("ALTER TABLE document_metadata ADD COLUMN site VARCHAR DEFAULT 'default'"))
-    # activity_logs — created automatically by create_all but column guard just in case
+        # users
+        if insp.has_table("users"):
+            cols = {c["name"] for c in insp.get_columns("users")}
+            if "site" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN site VARCHAR DEFAULT 'default'"))
+        # llm_configs
+        if insp.has_table("llm_configs"):
+            cols = {c["name"] for c in insp.get_columns("llm_configs")}
+            if "model_name" not in cols:
+                conn.execute(text("ALTER TABLE llm_configs ADD COLUMN model_name VARCHAR"))
+        # activity_logs
+        if insp.has_table("activity_logs"):
+            cols = {c["name"] for c in insp.get_columns("activity_logs")}
+            if "confidence_score" not in cols:
+                conn.execute(text("ALTER TABLE activity_logs ADD COLUMN confidence_score VARCHAR"))
 
 
 def seed_default_templates(db):

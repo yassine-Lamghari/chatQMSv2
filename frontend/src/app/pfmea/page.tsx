@@ -42,7 +42,6 @@ export default function PfmeaPage() {
     const stored = localStorage.getItem("user");
     if (!stored) { router.push("/login"); return; }
     const u = JSON.parse(stored);
-    if (u.role !== "admin") { router.push("/"); return; }
     setUser(u);
   }, [router]);
 
@@ -91,6 +90,21 @@ export default function PfmeaPage() {
       setRows(prev => prev.map((r, i) => i === idx ? { ...r, _missing: data.missing_fields, _warnings: data.warnings } : r));
     } catch { /* silent */ }
     finally { setVerifying(null); }
+  };
+
+  const exportExcel = async () => {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"}/api/generate/pfmea/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows, process, product }),
+      });
+      if (!res.ok) { alert("Export Excel échoué"); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url;
+      a.download = `pfmea_${process}_${product}.xlsx`.replace(/\s+/g, "_"); a.click();
+    } catch { alert("Erreur export Excel"); }
   };
 
   const exportCSV = () => {
@@ -174,6 +188,7 @@ export default function PfmeaPage() {
             {rows.length > 0 && (
               <>
                 <button onClick={exportCSV} style={btnSecondary}>📥 Export CSV</button>
+                <button onClick={exportExcel} style={{...btnSecondary, background:"#166534", color:"#bbf7d0", border:"1px solid #16a34a"}}>📊 Export Excel</button>
                 <button onClick={() => setShowExcerpts(s => !s)} style={{ ...btnSecondary, background:"transparent" }}>
                   {showExcerpts ? "Masquer" : "Voir"} contexte RAG ({excerpts.length})
                 </button>
@@ -206,7 +221,7 @@ export default function PfmeaPage() {
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                 <thead>
                   <tr style={{ background:"#0f172a" }}>
-                    {["#","Étape process","Mode défaillance","Effets","S","O","D","RPN","Actions","Vérifier"].map(h => (
+                    {["#","Étape process","Mode défaillance","Effets","S","O","D","RPN","Actions","Statut","Vérifier"].map(h => (
                       <th key={h} style={{ padding:"10px 12px", textAlign:"left", color:"#94a3b8", fontWeight:600, whiteSpace:"nowrap", borderBottom:"1px solid #334155" }}>{h}</th>
                     ))}
                   </tr>
@@ -220,13 +235,13 @@ export default function PfmeaPage() {
                       <tr key={idx} style={{ background: idx % 2 === 0 ? "#1e293b" : "#162032", transition:"background 0.15s" }}>
                         <td style={{ padding:"8px 12px", color:"#64748b", fontWeight:700 }}>{row.line}</td>
                         <td style={{ padding:"8px 12px" }}>
+                          <input value={row.process_step} onChange={e => updateCell(idx, "process_step", e.target.value)} style={cellInput} />
+                        </td>
+                        <td style={{ padding:"8px 12px" }}>
                           <input value={row.failure_mode} onChange={e => updateCell(idx, "failure_mode", e.target.value)} style={cellInput} />
                         </td>
                         <td style={{ padding:"8px 12px" }}>
                           <input value={row.effects} onChange={e => updateCell(idx, "effects", e.target.value)} style={cellInput} />
-                        </td>
-                        <td style={{ padding:"8px 12px" }}>
-                          <input value={row.recommended_actions} onChange={e => updateCell(idx, "recommended_actions", e.target.value)} style={{ ...cellInput, width:160 }} />
                         </td>
                         {(["severity","occurrence","detection"] as (keyof PfmeaRow)[]).map(field => (
                           <td key={field} style={{ padding:"8px 12px" }}>
@@ -239,6 +254,9 @@ export default function PfmeaPage() {
                           <span style={{ fontWeight:700, color: rpnColor(row.rpn), fontSize:13 }}>
                             {row.rpn || "—"}
                           </span>
+                        </td>
+                        <td style={{ padding:"8px 12px" }}>
+                          <input value={row.recommended_actions} onChange={e => updateCell(idx, "recommended_actions", e.target.value)} style={{ ...cellInput, width:160 }} />
                         </td>
                         <td style={{ padding:"8px 12px", whiteSpace:"nowrap" }}>
                           {(row._missing?.length ?? 0) > 0 && (

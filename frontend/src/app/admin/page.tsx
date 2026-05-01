@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { toastSuccess, toastError } from "../components/Toast";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
 export default function AdminInterface() {
-  const [activeTab, setActiveTab] = useState("config");
+  const [activeTab, setActiveTab] = useState("dashboard");
 
   // ── F4 Audit state ──────────────────────────────────────────────
   const [auditStandard, setAuditStandard] = useState("ISO 9001");
@@ -44,6 +45,10 @@ export default function AdminInterface() {
   const [activeProvider, setActiveProvider] = useState("ollama");
   const [savingLlm, setSavingLlm] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState("ollama");
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [stats, setStats] = useState<any>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dropRef = useRef<HTMLDivElement>(null);
   const [llmCloudConfig, setLlmCloudConfig] = useState({
     groq: { api_key: "", base_url: "" },
     gemini: { api_key: "", base_url: "" },
@@ -52,16 +57,20 @@ export default function AdminInterface() {
   const [savingProvider, setSavingProvider] = useState<string | null>(null);
 
   useEffect(() => {
-    if (activeTab === "users") {
-      fetchUsers();
-    } else if (activeTab === "docs") {
-      fetchDocuments();
-    } else if (activeTab === "config") {
-      fetchLlmConfig();
-    } else if (activeTab === "logs") {
-      fetchLogs();
-    }
+    if (activeTab === "users") fetchUsers();
+    else if (activeTab === "docs") fetchDocuments();
+    else if (activeTab === "config") { fetchLlmConfig(); fetchOllamaModels(); }
+    else if (activeTab === "logs") fetchLogs();
+    else if (activeTab === "dashboard") fetchStats();
   }, [activeTab]);
+
+  const fetchStats = async () => {
+    try { const r = await fetch(`${API_BASE_URL}/api/stats`); if (r.ok) setStats(await r.json()); } catch {}
+  };
+
+  const fetchOllamaModels = async () => {
+    try { const r = await fetch(`${API_BASE_URL}/api/ollama/models`); if (r.ok) { const d = await r.json(); setOllamaModels(d.models || []); } } catch {}
+  };
 
   const handleGenerateAudit = async () => {
     if (!auditProcess.trim()) { setAuditError("Veuillez saisir un processus."); return; }
@@ -138,41 +147,27 @@ export default function AdminInterface() {
     setSavingProvider(provider);
     try {
       const res = await fetch(`${API_BASE_URL}/api/config/${provider}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(llmCloudConfig[provider]),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || `Failed to save ${provider}`);
-      }
-      alert(`Configuration ${provider} sauvegardée.`);
+      if (!res.ok) { const e = await res.json(); throw new Error(e.detail); }
+      toastSuccess(`Config ${provider} sauvegardée !`);
       fetchLlmConfig();
-    } catch (error: any) {
-      alert(`Erreur: ${error.message || "Impossible de sauvegarder"}`);
-    } finally {
-      setSavingProvider(null);
-    }
+    } catch (error: any) { toastError(error.message || "Impossible de sauvegarder"); }
+    finally { setSavingProvider(null); }
   };
 
   const handleSetActiveLlm = async () => {
     setSavingLlm(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/config/active`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: activeProvider }),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || "Failed to save active provider");
-      }
-      alert("LLM actif mis à jour.");
-    } catch (error: any) {
-      alert(`Erreur: ${error.message || "Impossible de sauvegarder"}`);
-    } finally {
-      setSavingLlm(false);
-    }
+      if (!res.ok) { const e = await res.json(); throw new Error(e.detail); }
+      toastSuccess("LLM actif mis à jour !");
+    } catch (error: any) { toastError(error.message || "Impossible de sauvegarder"); }
+    finally { setSavingLlm(false); }
   };
 
   const fetchDocuments = async () => {
@@ -207,38 +202,22 @@ export default function AdminInterface() {
     formData.append("site", newDoc.site);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/documents`, {
-        method: "POST",
-        body: formData,
-      });
+      const res = await fetch(`${API_BASE_URL}/api/documents`, { method: "POST", body: formData });
       if (res.ok) {
+        toastSuccess("Document uploadé et indexé !");
         setNewDoc({ file: null, doc_type: 'Procédure', criticality: 'Medium', version: '1.0', owner: 'QMS', language: 'fr', site: 'default' });
-        setShowUploadForm(false);
-        fetchDocuments();
-      } else {
-        const errorData = await res.json();
-        alert(`Erreur: ${errorData.detail}`);
-      }
-    } catch (error) {
-      console.error("Failed to upload document", error);
-    }
+        setShowUploadForm(false); fetchDocuments();
+      } else { const e = await res.json(); toastError(`Erreur: ${e.detail}`); }
+    } catch { toastError("Upload échoué."); }
   };
 
   const handleDeleteDocument = async (docId: number) => {
-    if (!confirm("Voulez-vous vraiment supprimer ce document ?")) return;
+    if (!window.confirm("Supprimer ce document ?")) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/documents/${docId}`, {
-        method: "DELETE"
-      });
-      if (res.ok) {
-        fetchDocuments();
-      } else {
-        const errorData = await res.json();
-        alert(`Erreur: ${errorData.detail}`);
-      }
-    } catch (error) {
-      console.error("Failed to delete document", error);
-    }
+      const res = await fetch(`${API_BASE_URL}/api/documents/${docId}`, { method: "DELETE" });
+      if (res.ok) { toastSuccess("Document supprimé."); fetchDocuments(); }
+      else { const e = await res.json(); toastError(e.detail); }
+    } catch { toastError("Suppression échouée."); }
   };
 
   const fetchUsers = async () => {
@@ -260,37 +239,20 @@ export default function AdminInterface() {
     e.preventDefault();
     try {
       const res = await fetch(`${API_BASE_URL}/api/users`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newUser)
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newUser)
       });
-      if (res.ok) {
-        setNewUser({ username: '', password: '', role: 'user' });
-        fetchUsers();
-      } else {
-        const errorData = await res.json();
-        alert(`Erreur: ${errorData.detail}`);
-      }
-    } catch (error) {
-      console.error("Failed to create user", error);
-    }
+      if (res.ok) { toastSuccess("Utilisateur créé !"); setNewUser({ username: '', password: '', role: 'user' }); fetchUsers(); }
+      else { const e = await res.json(); toastError(e.detail); }
+    } catch { toastError("Création échouée."); }
   };
 
   const handleDeleteUser = async (userId: number) => {
-    if (!confirm("Voulez-vous vraiment supprimer cet utilisateur ?")) return;
+    if (!window.confirm("Supprimer cet utilisateur ?")) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/users/${userId}`, {
-        method: "DELETE"
-      });
-      if (res.ok) {
-        fetchUsers();
-      } else {
-         const errorData = await res.json();
-         alert(`Erreur: ${errorData.detail}`);
-      }
-    } catch (error) {
-      console.error("Failed to delete user", error);
-    }
+      const res = await fetch(`${API_BASE_URL}/api/users/${userId}`, { method: "DELETE" });
+      if (res.ok) { toastSuccess("Utilisateur supprimé."); fetchUsers(); }
+      else { const e = await res.json(); toastError(e.detail); }
+    } catch { toastError("Suppression échouée."); }
   };
 
   useEffect(() => {
@@ -318,42 +280,20 @@ export default function AdminInterface() {
         </h2>
         
         <div className="flex flex-col space-y-2">
-          <button 
-            onClick={() => setActiveTab("config")}
-            className={`text-left px-4 py-2 rounded-lg transition ${activeTab === "config" ? "bg-blue-600/20 text-blue-400" : "hover:bg-slate-700 text-slate-300"}`}
-          >
-            ⚙ Configuration LLM
-          </button>
-          <button 
-            onClick={() => setActiveTab("docs")}
-            className={`text-left px-4 py-2 rounded-lg transition ${activeTab === "docs" ? "bg-blue-600/20 text-blue-400" : "hover:bg-slate-700 text-slate-300"}`}
-          >
-            📄 Documents (RAG)
-          </button>
-          <button 
-            onClick={() => setActiveTab("users")}
-            className={`text-left px-4 py-2 rounded-lg transition ${activeTab === "users" ? "bg-blue-600/20 text-blue-400" : "hover:bg-slate-700 text-slate-300"}`}
-          >
-            👥 Utilisateurs
-          </button>
-          <button
-            onClick={() => setActiveTab("audit")}
-            className={`text-left px-4 py-2 rounded-lg transition ${activeTab === "audit" ? "bg-amber-600/20 text-amber-400" : "hover:bg-slate-700 text-slate-300"}`}
-          >
-            🗂 Assistant Audit QMS
-          </button>
-          <button
-            onClick={() => setActiveTab("logs")}
-            className={`text-left px-4 py-2 rounded-lg transition ${activeTab === "logs" ? "bg-emerald-600/20 text-emerald-400" : "hover:bg-slate-700 text-slate-300"}`}
-          >
-            📋 Logs d'activité
-          </button>
-          <Link
-            href="/pfmea"
-            className="text-left px-4 py-2 rounded-lg transition hover:bg-slate-700 text-slate-300 flex items-center gap-2"
-          >
-            🔧 Générateur PFMEA
-          </Link>
+          {([
+            { id:"dashboard", icon:"📊", label:"Tableau de bord",  active:"bg-purple-600/20 text-purple-400" },
+            { id:"config",    icon:"⚙",  label:"Config LLM",       active:"bg-blue-600/20 text-blue-400" },
+            { id:"docs",      icon:"📄", label:"Documents (RAG)",  active:"bg-blue-600/20 text-blue-400" },
+            { id:"users",     icon:"👥", label:"Utilisateurs",     active:"bg-blue-600/20 text-blue-400" },
+            { id:"audit",     icon:"🗂", label:"Assistant Audit",  active:"bg-amber-600/20 text-amber-400" },
+            { id:"logs",      icon:"📋", label:"Logs d'activité",  active:"bg-emerald-600/20 text-emerald-400" },
+          ] as const).map(t => (
+            <button key={t.id} onClick={() => setActiveTab(t.id)}
+              className={`text-left px-4 py-2 rounded-lg transition ${activeTab === t.id ? t.active : "hover:bg-slate-700 text-slate-300"}`}>
+              {t.icon} {t.label}
+            </button>
+          ))}
+          <Link href="/pfmea" className="text-left px-4 py-2 rounded-lg hover:bg-slate-700 text-slate-300 transition">🔧 Générateur PFMEA</Link>
         </div>
 
         <div className="mt-auto border-t border-slate-700 pt-4">
@@ -370,6 +310,49 @@ export default function AdminInterface() {
       {/* Main Admin Area */}
       <div className="flex-1 flex flex-col overflow-y-auto p-8">
         <h1 className="text-3xl font-bold mb-8 text-slate-100">Panneau d'Administration</h1>
+
+        {/* ── Dashboard KPI ── */}
+        {activeTab === "dashboard" && (
+          <div className="max-w-4xl space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[{label:"Documents",val:stats?.total_documents??"—",color:"#3b82f6"},{label:"Utilisateurs",val:stats?.total_users??"—",color:"#8b5cf6"},{label:"Requêtes chat",val:stats?.total_queries??"—",color:"#10b981"}].map(k=>(
+                <div key={k.label} className="bg-[#1e293b] border border-slate-700 rounded-2xl p-6 flex flex-col gap-2">
+                  <p className="text-slate-400 text-sm">{k.label}</p>
+                  <p className="text-4xl font-bold" style={{color:k.color}}>{k.val}</p>
+                </div>
+              ))}
+            </div>
+            {stats?.queries_per_day && Object.keys(stats.queries_per_day).length > 0 && (
+              <div className="bg-[#1e293b] border border-slate-700 rounded-2xl p-6">
+                <h3 className="font-semibold mb-4">📈 Requêtes / jour (7 derniers jours)</h3>
+                <div className="flex items-end gap-2 h-32">
+                  {Object.entries(stats.queries_per_day).sort().map(([day,cnt]:any)=>{
+                    const max=Math.max(...Object.values(stats.queries_per_day) as number[]);
+                    const pct=max>0?(cnt/max)*100:10;
+                    return <div key={day} className="flex flex-col items-center gap-1 flex-1">
+                      <div className="w-full rounded-t" style={{height:`${pct}%`,background:"#3b82f6",minHeight:4}}></div>
+                      <span className="text-xs text-slate-500">{day.slice(5)}</span>
+                      <span className="text-xs text-slate-300 font-bold">{cnt}</span>
+                    </div>;
+                  })}
+                </div>
+              </div>
+            )}
+            {stats?.top_documents?.length > 0 && (
+              <div className="bg-[#1e293b] border border-slate-700 rounded-2xl p-6">
+                <h3 className="font-semibold mb-4">📄 Documents les plus consultés</h3>
+                <div className="space-y-2">
+                  {stats.top_documents.map((d:any,i:number)=>(
+                    <div key={i} className="flex justify-between items-center text-sm">
+                      <span className="text-slate-300 truncate flex-1">{d.filename}</span>
+                      <span className="text-blue-400 font-bold ml-4">{d.count}×</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {activeTab === "config" && (
           <div className="max-w-2xl bg-[#1e293b] border border-slate-700 rounded-2xl p-6 shadow-lg">
@@ -396,6 +379,17 @@ export default function AdminInterface() {
                   Le chatbot utilisera ce modèle comme LLM principal.
                 </p>
               </div>
+
+              {selectedProvider === "ollama" && ollamaModels.length > 0 && (
+                <div className="space-y-2 border border-slate-700 rounded-xl p-4">
+                  <h4 className="font-medium text-slate-200">Modèle Ollama local</h4>
+                  <select value={ollamaSelectedModel} onChange={e => setOllamaSelectedModel(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 focus:outline-none focus:border-blue-500">
+                    {ollamaModels.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  <p className="text-xs text-slate-400">Modèles disponibles sur votre instance Ollama locale.</p>
+                </div>
+              )}
 
               {selectedProvider !== "ollama" && (
                 <div className="space-y-2 border border-slate-700 rounded-xl p-4">
@@ -469,6 +463,22 @@ export default function AdminInterface() {
             {showUploadForm && (
               <div className="mb-8 p-4 bg-slate-800/50 rounded-xl border border-slate-700">
                 <h4 className="text-lg font-medium mb-4">Nouveau document</h4>
+                {/* Drag & Drop zone */}
+                <div ref={dropRef}
+                  onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={e => {
+                    e.preventDefault(); setIsDragging(false);
+                    const f = e.dataTransfer.files[0];
+                    if (f) setNewDoc(prev => ({ ...prev, file: f }));
+                  }}
+                  className={`border-2 border-dashed rounded-xl p-6 text-center mb-4 transition ${
+                    isDragging ? "border-blue-400 bg-blue-500/10" : "border-slate-600 hover:border-slate-500"
+                  }`}>
+                  <p className="text-slate-400 text-sm">
+                    {newDoc.file ? `✓ ${newDoc.file.name}` : "Glissez un fichier ici ou utilisez le sélecteur ci-dessous"}
+                  </p>
+                </div>
                 <form onSubmit={handleUploadDocument} className="flex flex-col gap-4">
                   <div className="flex gap-4 items-end">
                     <div className="flex-1 space-y-2">

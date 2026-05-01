@@ -17,6 +17,7 @@ export default function LogsPage() {
     const stored = localStorage.getItem("user");
     if (!stored) { router.push("/login"); return; }
     const u = JSON.parse(stored);
+    if (u.role !== "admin") { router.push("/"); return; }
     setUser(u);
     fetchLogs();
   }, [router]);

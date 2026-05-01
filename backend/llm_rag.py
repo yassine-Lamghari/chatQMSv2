@@ -231,3 +231,55 @@ def build_numbered_context(section_refs: list[str], snippets: list[str], max_chu
         body = (snip or "").strip()[:_MAX_SNIPPET_CHARS]
         parts.append(f"[{i}] {ref}\n{body}")
     return "\n\n---\n\n".join(parts)
+
+
+def generate_pfmea_rows_llm(
+    *,
+    provider: str,
+    api_key: str | None,
+    base_url: str | None,
+    ollama_model: str | None,
+    process: str,
+    product: str,
+    known_defects: str,
+    numbered_context: str,
+    respond_english: bool,
+) -> list[dict] | None:
+    """
+    Uses LLM to generate enriched PFMEA rows from RAG context.
+    Returns list of dicts or None if it fails.
+    """
+    if respond_english:
+        system = (
+            "You are a QMS expert specializing in PFMEA. Based on the provided CONTEXT, generate a list of PFMEA rows. "
+            "Return ONLY a JSON object with a 'rows' key. "
+            "Each row must have: line (int), process_step, product, failure_mode, effects, severity (1-10 string), "
+            "occurrence (1-10 string), detection (1-10 string), rpn (string), recommended_actions, rag_context_excerpt (snippet from context).\n"
+            "Format: {\"rows\": [...]}. Do not add commentary outside JSON."
+        )
+        user = f"Process: {process}\nProduct: {product}\nKnown defects: {known_defects}\n\nCONTEXT:\n{numbered_context}"
+    else:
+        system = (
+            "Tu es un expert QMS spécialisé en PFMEA (AMDEC Process). En t'appuyant sur le CONTEXT fourni, génère une liste de lignes PFMEA. "
+            "Réponds UNIQUEMENT par un objet JSON avec une clé 'rows'. "
+            "Chaque ligne doit avoir : line (int), process_step, product, failure_mode, effects, severity (1-10 string), "
+            "occurrence (1-10 string), detection (1-10 string), rpn (string), recommended_actions, rag_context_excerpt (extrait du context).\n"
+            "Format : {\"rows\": [...]}. Pas de blabla en dehors du JSON."
+        )
+        user = f"Processus : {process}\nProduit : {product}\nDéfauts connus : {known_defects}\n\nCONTEXT :\n{numbered_context}"
+
+    try:
+        raw = invoke_llm(
+            provider,
+            api_key=api_key,
+            base_url=base_url,
+            ollama_model=ollama_model,
+            system_prompt=system,
+            user_prompt=user,
+        )
+        parsed = parse_llm_json(raw)
+        if parsed and "rows" in parsed and isinstance(parsed["rows"], list):
+            return parsed["rows"]
+    except Exception as e:
+        logger.warning("PFMEA LLM generation failed: %s", e)
+    return None
