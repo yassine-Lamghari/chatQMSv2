@@ -6,12 +6,24 @@ on unsigned localStorage objects.
 from __future__ import annotations
 
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from jose import JWTError, jwt
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me-in-production-please-use-a-long-random-string")
+# ── Sécurité #1 : forcer une vraie clé secrète ──────────────────────────────
+_raw_secret = os.getenv("JWT_SECRET_KEY", "")
+if not _raw_secret or _raw_secret == "change-me-generate-a-long-random-secret-key-here":
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "JWT_SECRET_KEY not set or using default value! "
+        "Generate one with: python -c \"import secrets; print(secrets.token_hex(64))\""
+    )
+    # En dev on tolère, mais on génère une clé aléatoire par session
+    _raw_secret = secrets.token_hex(64)
+
+SECRET_KEY = _raw_secret
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))  # 8 hours
 

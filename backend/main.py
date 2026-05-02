@@ -16,8 +16,10 @@ from database import (
     AppSetting,
     ActivityLog,
     ChatSession,
+    AuditResult,
     seed_default_templates,
 )
+from crypto_utils import encrypt_api_key, decrypt_api_key  # Fix #4
 from pydantic import BaseModel
 import bcrypt
 import os
@@ -278,7 +280,7 @@ def _active_llm_settings(db: Session) -> tuple[str | None, str | None, str | Non
     cfg = db.query(LLMConfig).filter(LLMConfig.provider == provider).first()
     if not cfg:
         return provider, None, None, None
-    key = (cfg.api_key or "").strip() or None
+    key = decrypt_api_key((cfg.api_key or "").strip()) or None  # Fix #4
     base = (cfg.base_url or "").strip() or None
     return provider, key, base, None
 
@@ -307,34 +309,59 @@ def _not_found_payload(locale: str):
 def read_root():
     return {"message": "Welcome to the QMS Chatbot API"}
 
+
+# Fix #17 — Indicateur de statut LLM pour l'UI
+@app.get("/api/llm/status")
+def get_llm_status(db: Session = Depends(get_db)):
+    """Retourne si un LLM est configuré et opérationnel."""
+    provider, api_key, base_url, ollama_model = _active_llm_settings(db)
+    if not provider:
+        return {"configured": False, "provider": None, "message": "Aucun LLM configuré — résultats en mode extrait uniquement"}
+    if provider == "ollama":
+        # Vérifier que Ollama est accessible
+        import urllib.request, urllib.error
+        try:
+            with urllib.request.urlopen(f"{base_url}/api/tags", timeout=2):
+                return {"configured": True, "provider": provider, "message": f"Ollama actif ({base_url})"}
+        except Exception:
+            return {"configured": False, "provider": provider, "message": f"Ollama non joignable sur {base_url}"}
+    # Provider cloud : vérifier qu'une clé est présente
+    if api_key and len(api_key) > 5:
+        return {"configured": True, "provider": provider, "message": f"LLM actif : {provider}"}
+    return {"configured": False, "provider": provider, "message": f"Clé API manquante pour {provider}"}
+
 @app.get("/api/config")
-def get_llm_configs(db: Session = Depends(get_db)):
+def get_llm_configs(db: Session = Depends(get_db), _user: dict = Depends(require_admin)):  # Fix #2
     configs = db.query(LLMConfig).all()
-    return configs
+    # Fix #4: ne jamais retourner les clés en clair
+    return [
+        {"id": c.id, "provider": c.provider, "api_key": "***" if c.api_key else None, "base_url": c.base_url, "model_name": c.model_name}
+        for c in configs
+    ]
 
 @app.post("/api/config")
-def update_llm_config(provider: str, api_key: str = None, base_url: str = None, db: Session = Depends(get_db)):
+def update_llm_config(provider: str, api_key: str = None, base_url: str = None, db: Session = Depends(get_db), _user: dict = Depends(require_admin)):  # Fix #2
     config = db.query(LLMConfig).filter(LLMConfig.provider == provider).first()
     if not config:
-        config = LLMConfig(provider=provider, api_key=api_key, base_url=base_url)
+        config = LLMConfig(provider=provider, api_key=encrypt_api_key(api_key), base_url=base_url)  # Fix #4
         db.add(config)
     else:
         if api_key is not None:
-            config.api_key = api_key
+            config.api_key = encrypt_api_key(api_key)  # Fix #4
         if base_url is not None:
             config.base_url = base_url
     db.commit()
     db.refresh(config)
-    return config
+    return {"provider": config.provider, "base_url": config.base_url}
 
 @app.get("/api/config/active")
-def get_active_llm(db: Session = Depends(get_db)):
+def get_active_llm(db: Session = Depends(get_db), _user: dict = Depends(require_admin)):  # Fix #2
     setting = db.query(AppSetting).filter(AppSetting.key == "active_llm_provider").first()
     return {"provider": setting.value if setting else None}
 
 
 @app.post("/api/config/active")
-def set_active_llm(payload: ActiveLLMRequest, db: Session = Depends(get_db)):
+def set_active_llm(payload: ActiveLLMRequest, db: Session = Depends(get_db), _user: dict = Depends(require_admin)):  # Fix #2
     provider = payload.provider.strip().lower()
     config = db.query(LLMConfig).filter(LLMConfig.provider == provider).first()
     if not config:
@@ -362,7 +389,7 @@ def get_llm_provider_config(provider: str, db: Session = Depends(get_db)):
 
 
 @app.put("/api/config/{provider}")
-def upsert_llm_provider_config(provider: str, payload: LLMProviderConfigRequest, db: Session = Depends(get_db)):
+def upsert_llm_provider_config(provider: str, payload: LLMProviderConfigRequest, db: Session = Depends(get_db), _user: dict = Depends(require_admin)):  # Fix #2
     provider_name = provider.strip().lower()
     if provider_name == "active":
         raise HTTPException(status_code=400, detail="Invalid provider name")
@@ -375,13 +402,13 @@ def upsert_llm_provider_config(provider: str, payload: LLMProviderConfigRequest,
         db.add(config)
 
     if payload.api_key is not None:
-        config.api_key = payload.api_key.strip() if payload.api_key else None
+        config.api_key = encrypt_api_key(payload.api_key.strip()) if payload.api_key else None  # Fix #4
     if payload.base_url is not None:
         config.base_url = payload.base_url.strip() if payload.base_url else None
 
     db.commit()
     db.refresh(config)
-    return config
+    return {"provider": config.provider, "base_url": config.base_url}
 
 @app.post("/api/chat")
 def chat(payload: ChatRequest, db: Session = Depends(get_db)):
@@ -665,7 +692,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
     return result
 
 @app.post("/api/search")
-def semantic_search(payload: SearchRequest, db: Session = Depends(get_db)):
+def semantic_search(payload: SearchRequest, db: Session = Depends(get_db), _user: dict = Depends(require_auth)):  # Fix #3
     raw_filters = payload.filters or {}
     metadata_filter = {}
     for key in ("doc_type", "criticality", "language", "owner", "version", "site"):
@@ -704,6 +731,80 @@ def semantic_search(payload: SearchRequest, db: Session = Depends(get_db)):
             }
         )
     return {"query": payload.query, "hits": out}
+
+
+# Fix #15 — Recherche avec filtres étendus
+class SearchRequestExtended(BaseModel):
+    query: str
+    top_k: int = 8
+    filters: dict = {}
+    # Nouveaux filtres
+    criticality: str | None = None
+    language: str | None = None
+    owner: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+
+@app.post("/api/search/advanced")
+def semantic_search_advanced(payload: SearchRequestExtended, db: Session = Depends(get_db), _user: dict = Depends(require_auth)):
+    """Recherche sémantique avec filtres étendus (criticality, language, owner, dates)."""
+    raw_filters = payload.filters or {}
+    metadata_filter = {}
+    for key in ("doc_type", "criticality", "language", "owner", "version", "site"):
+        val = raw_filters.get(key) or getattr(payload, key, None)
+        if isinstance(val, str) and val.strip():
+            metadata_filter[key] = val.strip()
+
+    k = max(1, min(payload.top_k, 20))
+    hits = search_similar_chunks(
+        query=payload.query.strip(),
+        k=k,
+        metadata_filter=metadata_filter if metadata_filter else None,
+    )
+
+    def _parse_dt(v):
+        if not v or not isinstance(v, str):
+            return None
+        try:
+            return datetime.fromisoformat(v.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            return None
+
+    df = _parse_dt(payload.date_from)
+    dt = _parse_dt(payload.date_to)
+
+    out = []
+    for doc, distance in hits:
+        if float(distance) > MAX_DISTANCE_THRESHOLD:
+            continue
+        rel = round(math.exp(-float(distance)), 4)
+        if rel < MIN_RELEVANCE_THRESHOLD:
+            continue
+        meta = doc.metadata or {}
+        source_doc_id = str(meta.get("doc_id", "unknown"))
+        db_doc = db.query(DocumentMetadata).filter(DocumentMetadata.id == int(source_doc_id)).first() if source_doc_id.isdigit() else None
+        # Filtre date
+        if db_doc and df and db_doc.uploaded_at and db_doc.uploaded_at < df:
+            continue
+        if db_doc and dt and db_doc.uploaded_at and db_doc.uploaded_at > dt:
+            continue
+        crit = meta.get("criticality") or (db_doc.criticality if db_doc else "")
+        out.append({
+            "section_ref": _section_ref(doc),
+            "excerpt": doc.page_content.strip()[:800],
+            "distance": float(distance),
+            "relevance": rel,
+            "filename": meta.get("filename"),
+            "doc_id": source_doc_id,
+            "doc_type": meta.get("doc_type"),
+            "criticality": crit,
+            "owner": meta.get("owner") or (db_doc.owner if db_doc else None),
+            "language": meta.get("language") or (db_doc.language if db_doc else None),
+            "site": meta.get("site") or (db_doc.site if db_doc else None),
+            "version": meta.get("version") or (db_doc.version if db_doc else None),
+            "uploaded_at": db_doc.uploaded_at.isoformat() if db_doc and db_doc.uploaded_at else None,
+        })
+    return {"query": payload.query, "hits": out, "total": len(out)}
 
 
 @app.get("/api/templates")
@@ -947,12 +1048,12 @@ def login_user(user: UserLogin, db: Session = Depends(get_db)):
 # --- User Management Endpoints ---
 
 @app.get("/api/users")
-def get_users(db: Session = Depends(get_db)):
+def get_users(db: Session = Depends(get_db), _user: dict = Depends(require_admin)):  # Fix #2
     users = db.query(User).all()
     return [{"id": u.id, "username": u.username, "role": u.role} for u in users]
 
 @app.post("/api/users")
-def create_user(user: UserCreate, db: Session = Depends(get_db)):
+def create_user(user: UserCreate, db: Session = Depends(get_db), _admin: dict = Depends(require_admin)):  # Fix #2
     if db.query(User).filter(User.username == user.username).first():
         raise HTTPException(status_code=400, detail="Username already exists")
     hashed_password = get_password_hash(user.password)
@@ -963,7 +1064,7 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
     return {"id": new_user.id, "username": new_user.username, "role": new_user.role}
 
 @app.delete("/api/users/{user_id}")
-def delete_user(user_id: int, db: Session = Depends(get_db)):
+def delete_user(user_id: int, db: Session = Depends(get_db), _admin: dict = Depends(require_admin)):  # Fix #2
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -976,7 +1077,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
 # --- Document Management Endpoints ---
 
 @app.get("/api/documents")
-def get_documents(db: Session = Depends(get_db)):
+def get_documents(db: Session = Depends(get_db), _user: dict = Depends(require_auth)):  # Fix #3
     docs = db.query(DocumentMetadata).all()
     return docs
 
@@ -1062,32 +1163,45 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/logs")
 def get_activity_logs(
-    limit: int = 100,
+    limit: int = 50,  # Fix #11: défaut réduit, pagination ajoutée
+    page: int = 1,  # Fix #11: pagination
     action: str | None = None,
     username: str | None = None,
     db: Session = Depends(get_db),
+    _user: dict = Depends(require_admin),  # Fix #2
 ):
+    # Fix #11: pagination
+    page = max(1, page)
+    per_page = max(1, min(limit, 100))
+    offset = (page - 1) * per_page
     q = db.query(ActivityLog)
     if action:
         q = q.filter(ActivityLog.action == action)
     if username:
         q = q.filter(ActivityLog.username == username)
-    logs = q.order_by(ActivityLog.created_at.desc()).limit(max(1, min(limit, 500))).all()
-    return [
-        {
-            "id": log.id,
-            "username": log.username,
-            "action": log.action,
-            "query": log.query,
-            "document_ids": log.document_ids,
-            "confidence": log.confidence,
-            "confidence_score": log.confidence_score,
-            "language_mode": log.language_mode,
-            "response_summary": log.response_summary,
-            "created_at": log.created_at.isoformat() if log.created_at else None,
-        }
-        for log in logs
-    ]
+    total = q.count()
+    logs = q.order_by(ActivityLog.created_at.desc()).offset(offset).limit(per_page).all()
+    return {
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": max(1, (total + per_page - 1) // per_page),
+        "items": [
+            {
+                "id": log.id,
+                "username": log.username,
+                "action": log.action,
+                "query": log.query,
+                "document_ids": log.document_ids,
+                "confidence": log.confidence,
+                "confidence_score": log.confidence_score,
+                "language_mode": log.language_mode,
+                "response_summary": log.response_summary,
+                "timestamp": log.created_at.isoformat() if log.created_at else None,
+            }
+            for log in logs
+        ]
+    }
 
 
 # --- Chat Sessions (persistent, DB-backed) ---
@@ -1196,6 +1310,125 @@ def export_pfmea_excel(payload: dict, db: Session = Depends(get_db)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# Fix #12 — Export PFMEA en PDF
+@app.post("/api/generate/pfmea/export/pdf")
+def export_pfmea_pdf(payload: dict):
+    """Export PFMEA rows as a formatted PDF file."""
+    try:
+        from fpdf import FPDF
+    except ImportError:
+        raise HTTPException(status_code=500, detail="fpdf2 non installé")
+
+    rows = payload.get("rows", [])
+    process_name = payload.get("process", "Process")
+    product_name = payload.get("product", "Product")
+
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.add_page()
+
+    # Titre
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_fill_color(30, 41, 59)
+    pdf.set_text_color(241, 245, 249)
+    pdf.cell(0, 10, f"PFMEA — {process_name} / {product_name}", ln=True, fill=True, align="C")
+    pdf.ln(4)
+
+    # En-têtes colonnes
+    headers = ["#", "Etape process", "Mode defaillance", "Effets", "S", "O", "D", "RPN", "Actions"]
+    col_w   = [10, 38, 48, 48, 8, 8, 8, 12, 48]
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_fill_color(51, 65, 85)
+    pdf.set_text_color(203, 213, 225)
+    for h, w in zip(headers, col_w):
+        pdf.cell(w, 8, h, border=1, fill=True, align="C")
+    pdf.ln()
+
+    # Lignes
+    pdf.set_font("Helvetica", "", 7.5)
+    for row in rows:
+        rpn_val = int(row.get("rpn", 0) or 0)
+        if rpn_val > 200:
+            pdf.set_fill_color(254, 226, 226)   # rouge
+        elif rpn_val > 100:
+            pdf.set_fill_color(254, 243, 199)   # ambre
+        else:
+            pdf.set_fill_color(220, 252, 231)   # vert
+        pdf.set_text_color(15, 23, 42)
+        vals = [
+            str(row.get("line", "")), row.get("process_step", ""),
+            row.get("failure_mode", ""), row.get("effects", ""),
+            str(row.get("severity", "")), str(row.get("occurrence", "")),
+            str(row.get("detection", "")), str(row.get("rpn", "")),
+            row.get("recommended_actions", ""),
+        ]
+        row_h = 7
+        for val, w in zip(vals, col_w):
+            pdf.cell(w, row_h, str(val)[:60], border=1, fill=True)
+        pdf.ln()
+
+    raw = pdf.output()
+    if isinstance(raw, str):
+        raw = raw.encode("latin-1")
+    buf = io.BytesIO(raw)
+    buf.seek(0)
+    fname = f"pfmea_{process_name}_{product_name}.pdf".replace(" ", "_")
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+# Fix #13 — Checklist audit interactive (sauvegarde en DB)
+class AuditChecklistSaveRequest(BaseModel):
+    standard: str
+    process: str
+    checklist: list  # [{question: str, checked: bool, note: str}]
+    username: str
+
+@app.post("/api/audit/checklist/save")
+def save_audit_checklist(
+    payload: AuditChecklistSaveRequest,
+    db: Session = Depends(get_db),
+    _user: dict = Depends(require_auth),
+):
+    """Sauvegarde une checklist audit remplie par un utilisateur."""
+    result = AuditResult(
+        username=payload.username,
+        standard=payload.standard,
+        process=payload.process,
+        checklist_json=json.dumps(payload.checklist, ensure_ascii=False),
+    )
+    db.add(result)
+    db.commit()
+    db.refresh(result)
+    return {"id": result.id, "message": "Checklist sauvegardée"}
+
+@app.get("/api/audit/checklist/history")
+def get_audit_history(
+    username: str | None = None,
+    db: Session = Depends(get_db),
+    _user: dict = Depends(require_auth),
+):
+    """Récupère l'historique des checklists audit."""
+    q = db.query(AuditResult)
+    if username:
+        q = q.filter(AuditResult.username == username)
+    results = q.order_by(AuditResult.created_at.desc()).limit(20).all()
+    return [
+        {
+            "id": r.id,
+            "username": r.username,
+            "standard": r.standard,
+            "process": r.process,
+            "checklist": json.loads(r.checklist_json or "[]"),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in results
+    ]
 
 
 # --- Stats Dashboard ---

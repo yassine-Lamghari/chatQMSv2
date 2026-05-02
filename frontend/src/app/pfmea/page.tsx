@@ -92,6 +92,21 @@ export default function PfmeaPage() {
     finally { setVerifying(null); }
   };
 
+  const exportPdf = async () => {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"}/api/generate/pfmea/export/pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows, process, product }),
+      });
+      if (!res.ok) { alert("Export PDF échoué"); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url;
+      a.download = `pfmea_${process}_${product}.pdf`.replace(/\s+/g, "_"); a.click();
+    } catch { alert("Erreur export PDF"); }
+  };
+
   const exportExcel = async () => {
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"}/api/generate/pfmea/export`, {
@@ -134,11 +149,11 @@ export default function PfmeaPage() {
   );
 
   return (
-    <div style={{ minHeight:"100vh", background:"#0f172a", color:"#e2e8f0", fontFamily:"Inter, system-ui, sans-serif" }}>
+    <div style={{ minHeight:"100vh", background:"var(--color-bg)", color:"var(--color-text)", fontFamily:"var(--font-sans)" }}>
 
       {/* Top bar */}
-      <header style={{ background:"#1e293b", borderBottom:"1px solid #334155", padding:"16px 32px", display:"flex", alignItems:"center", gap:"16px" }}>
-        <Link href="/admin" style={{ color:"#94a3b8", textDecoration:"none", fontSize:14, display:"flex", alignItems:"center", gap:6 }}>
+      <header style={{ background:"var(--color-card)", borderBottom:"1px solid var(--color-border)", padding:"16px 32px", display:"flex", alignItems:"center", gap:"16px" }}>
+        <Link href="/admin" style={{ color:"var(--color-text-muted)", textDecoration:"none", fontSize:14, display:"flex", alignItems:"center", gap:6 }}>
           ← Admin
         </Link>
         <div style={{ width:1, height:24, background:"#334155" }} />
@@ -150,7 +165,7 @@ export default function PfmeaPage() {
         </span>
       </header>
 
-      <div style={{ maxWidth:1400, margin:"0 auto", padding:"32px 24px" }}>
+        <div style={{ maxWidth:1400, margin:"0 auto", padding:"32px 24px" }}>
 
         {/* Input card */}
         <div style={{ background:"#1e293b", border:"1px solid #334155", borderRadius:16, padding:24, marginBottom:24 }}>
@@ -189,6 +204,8 @@ export default function PfmeaPage() {
               <>
                 <button onClick={exportCSV} style={btnSecondary}>📥 Export CSV</button>
                 <button onClick={exportExcel} style={{...btnSecondary, background:"#166534", color:"#bbf7d0", border:"1px solid #16a34a"}}>📊 Export Excel</button>
+                {/* Fix #12 — Export PDF */}
+                <button onClick={exportPdf} style={{...btnSecondary, background:"#7f1d1d", color:"#fca5a5", border:"1px solid #dc2626"}}>📕 Export PDF</button>
                 <button onClick={() => setShowExcerpts(s => !s)} style={{ ...btnSecondary, background:"transparent" }}>
                   {showExcerpts ? "Masquer" : "Voir"} contexte RAG ({excerpts.length})
                 </button>

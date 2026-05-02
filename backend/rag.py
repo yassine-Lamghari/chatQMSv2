@@ -177,7 +177,7 @@ def search_similar_chunks(
         return hits[:k]
 
     try:
-        max_chars = 512
+        max_chars = 1500  # Fix #10 — augmenté (les cross-encoders récents acceptent jusqu'à 8192 tokens)
         pairs = []
         for doc, _dist in hits:
             text = (doc.page_content or "")[:max_chars]

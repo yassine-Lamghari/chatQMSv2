@@ -3,6 +3,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import {
+  IconQMS, IconNewChat, IconAudit, IconPFMEA, IconSearch,
+  IconTrash, IconSend, IconAttach, IconLogout, IconChat, IconShield
+} from "./components/Icons";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const CHAT_HISTORY_KEY = "qms_chat_history";
@@ -134,6 +138,7 @@ function AssistantBody({ msg, view, locale }: { msg: ChatMessage; view: "summary
 }
 
 export default function Chatbot() {
+  const [hoveredSession, setHoveredSession] = useState<string | null>(null);
   const [messages, setMessages]           = useState<ChatMessage[]>([]);
   const [sessions, setSessions]           = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -149,6 +154,7 @@ export default function Chatbot() {
   const [filterDateTo, setFilterDateTo]   = useState("");
   const [user, setUser]                   = useState<{ username: string; role: string } | null>(null);
   const [activeLLM, setActiveLLM]         = useState<string | null>(null);
+  const [llmConfigured, setLlmConfigured] = useState<boolean>(true);  // Fix #17
   const router   = useRouter();
   const bottomRef = useRef<HTMLDivElement>(null);
   const lbl = L(uiLocale);
@@ -185,10 +191,10 @@ export default function Chatbot() {
           if (parsed2.length > 0) { setActiveSessionId(parsed2[0].id); setMessages(parsed2[0].messages); }
         }
       });
-    // Load active LLM
-    fetch(`${API_BASE_URL}/api/config/active`)
+    // Load active LLM + Fix #17 statut
+    fetch(`${API_BASE_URL}/api/llm/status`)
       .then(r => r.ok ? r.json() : {})
-      .then(d => setActiveLLM(d?.provider || null))
+      .then(d => { setActiveLLM(d?.provider || null); setLlmConfigured(d?.configured ?? true); })
       .catch(() => {});
   }, [router]);
 
@@ -242,6 +248,18 @@ export default function Chatbot() {
     setActiveSessionId(found.id);
     setMessages(found.messages);
   };
+
+  const deleteSession = (id: string) => {
+    const next = sessions.filter(s => s.id !== id);
+    persistSessions(next);
+    fetch(`${API_BASE_URL}/api/sessions/${id}`, { method: "DELETE" }).catch(() => {});
+    if (activeSessionId === id) {
+      if (next.length > 0) { setActiveSessionId(next[0].id); setMessages(next[0].messages); }
+      else { setActiveSessionId(null); setMessages([]); }
+    }
+  };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!user) return (
     <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "var(--color-bg)", color: "var(--color-text-muted)" }}>
@@ -317,40 +335,49 @@ export default function Chatbot() {
 
   const initials = user.username.slice(0, 2).toUpperCase();
 
+  // Fix #17 — message d'avertissement LLM
+  const llmWarning = !llmConfigured ? (
+    uiLocale === "en"
+      ? "⚠ No LLM configured — answers in excerpt-only mode. Configure a model in admin settings."
+      : "⚠ Aucun LLM configuré — réponses en mode extrait uniquement. Configurez un modèle dans les paramètres admin."
+  ) : null;
+
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+    <div className="claude-theme" style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
 
       {/* ── Sidebar ── */}
       <aside className="sidebar">
         {/* Brand */}
         <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "6px 12px 12px" }}>
-          <div className="claude-icon" style={{ width: 30, height: 30, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, color: "white", fontWeight: 700, flexShrink: 0 }}>Q</div>
-          <span style={{ fontSize: "15px", fontWeight: 600, color: "#d4cfc6" }}>QMS Assistant</span>
+          <IconQMS size={30} />
+          <span style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-text)", letterSpacing: "-0.01em" }}>QMS Assistant</span>
         </div>
 
         {/* New chat */}
         <button className="sidebar-btn-new" onClick={startNewChat} id="new-chat-btn">
-          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
+          <IconNewChat size={16} />
           {lbl.newChat}
         </button>
 
         {/* ── Quick Access Tools ── */}
         <div style={{ padding: "8px 8px 4px" }}>
-          <p className="sidebar-section-label" style={{ paddingTop: "6px" }}>
-            {uiLocale === "en" ? "Tools" : "Outils"}
-          </p>
+          <div style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 4px 4px" }}>
+            <div style={{ flex:1, height:1, background:"var(--color-border-dark)" }} />
+            <span style={{ fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", color:"var(--color-text-muted)" }}>
+              {uiLocale === "en" ? "Tools" : "Outils"}
+            </span>
+            <div style={{ flex:1, height:1, background:"var(--color-border-dark)" }} />
+          </div>
           <Link href="/audit" className="sidebar-tool-link" id="nav-audit">
-            <span className="sidebar-tool-icon">🗂</span>
+            <span className="sidebar-tool-icon"><IconAudit size={16} /></span>
             <span>{uiLocale === "en" ? "QMS Audit Assistant" : "Assistant Audit QMS"}</span>
           </Link>
           <Link href="/pfmea" className="sidebar-tool-link" id="nav-pfmea">
-            <span className="sidebar-tool-icon">🔧</span>
+            <span className="sidebar-tool-icon"><IconPFMEA size={16} /></span>
             <span>{uiLocale === "en" ? "PFMEA Generator" : "Générateur PFMEA"}</span>
           </Link>
           <Link href="/search" className="sidebar-tool-link" id="nav-search">
-            <span className="sidebar-tool-icon">🔍</span>
+            <span className="sidebar-tool-icon"><IconSearch size={16} /></span>
             <span>{uiLocale === "en" ? "Semantic Search" : "Recherche sémantique"}</span>
           </Link>
         </div>
@@ -359,21 +386,45 @@ export default function Chatbot() {
         <div style={{ flex: 1, overflowY: "auto", marginTop: "4px" }}>
           {sessions.length > 0 && (
             <>
-              <p className="sidebar-section-label">{lbl.recent}</p>
+              <div style={{ display:"flex", alignItems:"center", gap:6, padding:"10px 4px 4px 12px" }}>
+                <div style={{ flex:1, height:1, background:"var(--color-border-dark)" }} />
+                <span style={{ fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", color:"var(--color-text-muted)" }}>
+                  {lbl.recent}
+                </span>
+                <div style={{ flex:1, height:1, background:"var(--color-border-dark)" }} />
+              </div>
               {sessions.map(s => (
-                <button
-                  key={s.id}
-                  className={`sidebar-item${s.id === activeSessionId ? " active" : ""}`}
-                  onClick={() => openSession(s.id)}
-                  title={s.title}
-                >
-                  {s.title}
-                </button>
+                <div key={s.id} style={{ position:"relative" }}
+                  onMouseEnter={() => setHoveredSession(s.id)}
+                  onMouseLeave={() => setHoveredSession(null)}>
+                  <button
+                    className={`sidebar-item${s.id === activeSessionId ? " active" : ""}`}
+                    onClick={() => openSession(s.id)}
+                    title={s.title}
+                    style={{ paddingRight: hoveredSession === s.id ? 36 : 12 }}
+                  >
+                    {(s.title || lbl.newChat).slice(0, 30)}{(s.title || "").length > 30 ? "…" : ""}
+                  </button>
+                  {hoveredSession === s.id && (
+                    <button
+                      onClick={e => { e.stopPropagation(); deleteSession(s.id); }}
+                      title="Supprimer"
+                      style={{
+                        position:"absolute", right:8, top:"50%", transform:"translateY(-50%)",
+                        background:"transparent", border:"none", cursor:"pointer",
+                        color:"#9ca3af", padding:"4px", borderRadius:6,
+                        display:"flex", alignItems:"center", transition:"color 0.15s",
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.color="#ef4444")}
+                      onMouseLeave={e => (e.currentTarget.style.color="#9ca3af")}
+                    ><IconTrash size={14} /></button>
+                  )}
+                </div>
               ))}
             </>
           )}
           {sessions.length === 0 && (
-            <p style={{ fontSize: "13px", color: "#5a5750", padding: "8px 12px" }}>{lbl.noRecent}</p>
+            <p style={{ fontSize: "13px", color: "var(--color-text-muted)", padding: "8px 12px" }}>{lbl.noRecent}</p>
           )}
         </div>
 
@@ -388,8 +439,8 @@ export default function Chatbot() {
                 style={{
                   flex: 1, padding: "5px", borderRadius: "6px", fontSize: "12px", fontWeight: 500,
                   border: "none", cursor: "pointer", transition: "all 0.15s",
-                  background: uiLocale === loc ? "#3a3730" : "transparent",
-                  color: uiLocale === loc ? "#f0ece5" : "#7a7570",
+                  background: uiLocale === loc ? "var(--color-pill-bg)" : "transparent",
+                  color: uiLocale === loc ? "var(--color-accent)" : "var(--color-text-faint)",
                 }}
               >
                 {loc.toUpperCase()}
@@ -401,8 +452,8 @@ export default function Chatbot() {
           <div className="sidebar-user" onClick={() => { localStorage.removeItem("user"); router.push("/login"); }} title={lbl.logout}>
             <div className="sidebar-avatar">{initials}</div>
             <div style={{ flex: 1, overflow: "hidden" }}>
-              <p style={{ fontSize: "13px", fontWeight: 500, color: "#c4bfb6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.username}</p>
-              <p style={{ fontSize: "11px", color: "#5a5750" }}>{lbl.logout}</p>
+              <p style={{ fontSize: "13px", fontWeight: 500, color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.username}</p>
+              <p style={{ fontSize: "11px", color: "var(--color-text-faint)" }}>{lbl.logout}</p>
             </div>
           </div>
         </div>
@@ -410,42 +461,53 @@ export default function Chatbot() {
 
       {/* ── Main ── */}
       <main className="chat-main">
+        {/* Fix #17 — Bandeau avertissement LLM */}
+        {llmWarning && (
+          <div style={{ background:"#fef3c7", borderBottom:"1px solid #fde68a", padding:"8px 24px", fontSize:12, color:"#92400e", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+            <span>{llmWarning}</span>
+            <a href="/admin" style={{ color:"#b45309", fontWeight:600, marginLeft:"auto", textDecoration:"underline" }}>→ Admin</a>
+          </div>
+        )}
 
         {/* Top bar */}
         <header className="topbar">
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-            {/* View toggle */}
+            {/* View toggle — segmented pill */}
             <div className="topbar-toggle">
-              <button className={chatView === "summary" ? "active" : ""} onClick={() => setChatView("summary")} id="view-summary-btn">{lbl.viewSummary}</button>
-              <button className={chatView === "detail" ? "active" : ""} onClick={() => setChatView("detail")} id="view-detail-btn">{lbl.viewDetail}</button>
+              {([{v:"summary",l:lbl.viewSummary,id:"view-summary-btn"},{v:"detail",l:lbl.viewDetail,id:"view-detail-btn"}] as const).map(opt => (
+                <button key={opt.v} id={opt.id}
+                  className={chatView === opt.v ? "active" : ""}
+                  onClick={() => setChatView(opt.v as "summary"|"detail")}>
+                  {opt.l}
+                </button>
+              ))}
             </div>
 
-            {/* Response language selector — EN only or FR + EN sources */}
-            <div className="topbar-toggle" title={uiLocale === "en" ? "Response language" : "Langue de réponse"}>
+            {/* Language toggle — segmented pill */}
+            <div className="topbar-toggle">
               {([
-                { value: "en_only",            label: uiLocale === "en" ? "EN only"        : "EN seul" },
-                { value: "fr_with_en_sources", label: uiLocale === "en" ? "FR + EN sources" : "FR + src EN" },
+                { value: "en_only",            label: "EN" },
+                { value: "fr_with_en_sources", label: "FR+EN" },
               ] as const).map(opt => (
-                <button
-                  key={opt.value}
-                  id={`lang-mode-${opt.value}`}
+                <button key={opt.value} id={`lang-mode-${opt.value}`}
                   className={languageMode === opt.value ? "active" : ""}
                   onClick={() => setLanguageMode(opt.value)}
-                  title={opt.label}
-                >
+                  title={opt.value === "en_only" ? "English only" : "FR + EN sources"}>
                   {opt.label}
                 </button>
               ))}
             </div>
 
-            {/* Filters */}
-            <button className={`topbar-btn${showFilters ? " active" : ""}`} onClick={() => setShowFilters(s => !s)} id="filters-btn">
-              {lbl.filters}
+            {/* Filters toggle */}
+            <button id="filters-btn" className={`topbar-btn${showFilters ? " active" : ""}`}
+              onClick={() => setShowFilters(s => !s)}>
+              ⚙ {lbl.filters}
             </button>
           </div>
 
-          {/* Model badge — dynamic */}
-          <span style={{ fontSize: "12px", color: "var(--color-text-faint)", background: "var(--color-bg-subtle)", padding: "4px 10px", borderRadius: "20px", border: "1px solid var(--color-border)" }}>
+          {/* Model badge pill */}
+          <span style={{ fontSize:12, fontWeight:600, color:"var(--color-accent)", background:"var(--color-pill-bg)",
+            padding:"4px 14px", borderRadius:999, border:"1.5px solid var(--color-pill-border)", letterSpacing:"0.02em" }}>
             {activeLLM ? activeLLM.charAt(0).toUpperCase() + activeLLM.slice(1) : "RAG"} · QMS
           </span>
         </header>
@@ -475,27 +537,36 @@ export default function Chatbot() {
           <div className="messages-inner">
             {messages.length === 0 ? (
               <div className="welcome">
-                <div className="welcome-logo claude-icon" style={{ width: 56, height: 56, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, color: "white", fontWeight: 700 }}>Q</div>
-                <h2>{lbl.welcome}</h2>
-                <p>{lbl.welcomeSub}</p>
-                
+                <div className="welcome-logo" style={{ width:64, height:64, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", background:"linear-gradient(135deg,#fff7ed,#ffedd5)", border:"2px solid #fed7aa" }}>
+                  <IconQMS size={38} />
+                </div>
+                <h2 style={{ fontSize:24, fontWeight:600, color:"var(--color-text)", letterSpacing:"-0.02em" }}>{lbl.welcome}</h2>
+                <p style={{ fontSize:14, color:"var(--color-text-faint)", maxWidth:380, textAlign:"center" }}>{lbl.welcomeSub}</p>
+
                 {/* ── Action Cards ── */}
-                <div className="welcome-actions">
-                  <Link href="/audit" className="welcome-action-card">
-                    <span className="welcome-action-icon">🗂</span>
-                    <span className="welcome-action-text">{uiLocale === "en" ? "QMS Audit Assistant" : "Assistant Audit QMS"}</span>
-                  </Link>
-                  <Link href="/pfmea" className="welcome-action-card">
-                    <span className="welcome-action-icon">🔧</span>
-                    <span className="welcome-action-text">{uiLocale === "en" ? "PFMEA Generator" : "Générateur PFMEA"}</span>
-                  </Link>
+                <div style={{ display:"flex", gap:20, marginTop:36, flexWrap:"wrap", justifyContent:"center" }}>
+                  {([
+                    { href:"/audit",  Icon: IconAudit,  title: uiLocale==="en" ? "QMS Audit"      : "Audit QMS",           desc: uiLocale==="en" ? "Generate checklists & audit plans" : "Checklists & plans d'audit" },
+                    { href:"/pfmea",  Icon: IconPFMEA,  title: uiLocale==="en" ? "PFMEA Generator" : "Générateur PFMEA",    desc: uiLocale==="en" ? "Risk analysis with AI assistance"  : "Analyse des risques IA" },
+                    { href:"/search", Icon: IconSearch, title: uiLocale==="en" ? "Semantic Search" : "Recherche sémantique", desc: uiLocale==="en" ? "Search directly in QMS documents" : "Recherche dans vos documents QMS" },
+                  ]).map(card => (
+                    <Link key={card.href} href={card.href} className="welcome-action-card">
+                      <span className="welcome-action-icon" style={{ color:"#f97316" }}><card.Icon size={22} /></span>
+                      <span>
+                        <span style={{ display:"block", fontSize:14, fontWeight:600, color:"var(--color-text)" }}>{card.title}</span>
+                        <span style={{ display:"block", fontSize:12, color:"var(--color-text-faint)", marginTop:3, lineHeight:1.4 }}>{card.desc}</span>
+                      </span>
+                    </Link>
+                  ))}
                 </div>
               </div>
             ) : (
               messages.map((msg, i) => (
                 <div key={i} className={`msg-row ${msg.role}`}>
                   {msg.role === "assistant" && (
-                    <div className="msg-avatar claude">Q</div>
+                    <div className="msg-avatar claude" style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
+                      <IconShield size={16} />
+                    </div>
                   )}
                   <div className={`msg-bubble ${msg.role}`}>
                     {msg.role === "assistant"
@@ -510,7 +581,9 @@ export default function Chatbot() {
             {/* Loading indicator */}
             {isLoading && (
               <div className="msg-row assistant">
-                <div className="msg-avatar claude">Q</div>
+                <div className="msg-avatar claude" style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <IconShield size={16} />
+                </div>
                 <div className="msg-bubble assistant">
                   <div className="thinking">
                     <span /><span /><span />
@@ -527,32 +600,43 @@ export default function Chatbot() {
         {/* Input */}
         <div className="input-area">
           <div className="input-wrap">
+            {/* Attachment button */}
+            <button id="attach-btn"
+              title={uiLocale === "en" ? "Attach document" : "Joindre un document"}
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                position:"absolute", left:10, bottom:10,
+                width:34, height:34, borderRadius:10,
+                border:"1px solid var(--color-input-border)", background:"var(--color-input-bg)",
+                color:"var(--color-text-faint)", display:"flex", alignItems:"center",
+                justifyContent:"center", cursor:"pointer", transition:"all 0.15s",
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color="var(--color-accent)"; (e.currentTarget as HTMLElement).style.borderColor="#fed7aa"; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color="var(--color-text-faint)"; (e.currentTarget as HTMLElement).style.borderColor="var(--color-input-border)"; }}
+            ><IconAttach size={16} /></button>
+            <input ref={fileInputRef} type="file" style={{ display:"none" }} />
             <textarea
               id="chat-input"
               className="input-box"
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder={isLoading ? lbl.placeholderLoading : lbl.placeholder}
+              placeholder={isLoading ? lbl.placeholderLoading
+                : (uiLocale === "en"
+                  ? "Ask about a QMS procedure, standard, or document…"
+                  : "Posez une question sur une procédure, norme ou document QMS…")}
               rows={2}
               disabled={isLoading}
             />
-            <button
-              id="send-btn"
-              className="send-btn"
-              onClick={handleSend}
-              disabled={isLoading || !input.trim()}
-              aria-label="Send"
-            >
+            <button id="send-btn" className="send-btn" onClick={handleSend}
+              disabled={isLoading || !input.trim()} aria-label="Send">
               {isLoading ? (
-                <svg className="spin" width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <svg className="spin" width="15" height="15" viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeOpacity="0.3" />
                   <path d="M12 2a10 10 0 0 1 10 10" stroke="white" strokeWidth="3" strokeLinecap="round" />
                 </svg>
               ) : (
-                <svg width="16" height="16" fill="none" stroke="white" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" />
-                </svg>
+                <IconSend size={15} />
               )}
             </button>
           </div>

@@ -35,7 +35,7 @@ export default function Login() {
   };
 
   return (
-    <div style={{
+    <div className="claude-theme" style={{
       minHeight: "100vh",
       display: "flex",
       alignItems: "center",
@@ -64,11 +64,11 @@ export default function Login() {
 
         {/* Card */}
         <div style={{
-          background: "white",
+          background: "var(--color-card)",
           border: "1px solid var(--color-border)",
           borderRadius: "16px",
           padding: "32px",
-          boxShadow: "0 2px 16px rgba(0,0,0,0.07)",
+          boxShadow: "var(--shadow-card)",
         }}>
           {error && (
             <div style={{
@@ -98,6 +98,7 @@ export default function Login() {
                   borderRadius: "9px", padding: "10px 14px",
                   fontSize: "15px", color: "var(--color-text)",
                   outline: "none", fontFamily: "inherit",
+                  background: "var(--color-input-bg)",
                   transition: "border-color 0.15s",
                   boxSizing: "border-box",
                 }}
@@ -123,6 +124,7 @@ export default function Login() {
                   borderRadius: "9px", padding: "10px 14px",
                   fontSize: "15px", color: "var(--color-text)",
                   outline: "none", fontFamily: "inherit",
+                  background: "var(--color-input-bg)",
                   transition: "border-color 0.15s",
                   boxSizing: "border-box",
                 }}
@@ -137,7 +139,7 @@ export default function Login() {
               disabled={loading}
               style={{
                 width: "100%",
-                background: loading ? "#e0b89a" : "var(--color-accent)",
+                background: loading ? "var(--color-border-dark)" : "var(--color-accent)",
                 color: "white",
                 border: "none",
                 borderRadius: "9px",

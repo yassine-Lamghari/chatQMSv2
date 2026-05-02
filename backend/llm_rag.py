@@ -13,7 +13,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_MAX_SNIPPET_CHARS = 3600
+_MAX_SNIPPET_CHARS = 6000  # Fix #9 — augmenté pour les procédures QMS longues
 
 
 def _strip_json_fence(raw: str) -> str:

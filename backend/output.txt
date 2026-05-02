@@ -1,0 +1,15 @@
+C:\Users\ASUS ROG\Desktop\chat\backend\main.py:189: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+INFO:     Started server process [6160]
+INFO:     Waiting for application startup.
+RAG: embedding model is sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (Chroma dir=./chroma_db). If results are wrong or empty after an upgrade, delete the Chroma folder and re-upload documents so vectors are rebuilt.
+RAG: prÚ-chargement du modÞle d'embedding en mÚmoire...
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]
+Loading weights: 100%|##########| 199/199 [00:00<00:00, 4026.86it/s]

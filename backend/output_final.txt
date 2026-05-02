@@ -1,0 +1,20 @@
+C:\Users\ASUS ROG\Desktop\chat\backend\main.py:189: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+INFO:     Started server process [11928]
+INFO:     Waiting for application startup.
+RAG: embedding model is sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (Chroma dir=./chroma_db). If results are wrong or empty after an upgrade, delete the Chroma folder and re-upload documents so vectors are rebuilt.
+RAG: prÚ-chargement du modÞle d'embedding en mÚmoire...
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]
+Loading weights: 100%|##########| 199/199 [00:00<00:00, 2349.07it/s]
+RAG: modÞle pret !
+INFO:     Application startup complete.
+ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000): une seule utilisation de chaque adresse de socket (protocole/adresse rÚseau/port) est habituellement autorisÚe
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.

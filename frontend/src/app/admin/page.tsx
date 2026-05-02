@@ -7,6 +7,14 @@ import { toastSuccess, toastError } from "../components/Toast";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
+// Fix #5 — envoyer le JWT dans tous les appels admin
+function authHeaders(json = true): Record<string, string> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  const base: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  if (json) base["Content-Type"] = "application/json";
+  return base;
+}
+
 export default function AdminInterface() {
   const [activeTab, setActiveTab] = useState("dashboard");
 
@@ -98,7 +106,7 @@ export default function AdminInterface() {
     try {
       const params = new URLSearchParams({ limit: "200" });
       if (logsFilter.trim()) params.set("action", logsFilter.trim());
-      const res = await fetch(`${API_BASE_URL}/api/logs?${params}`);
+      const res = await fetch(`${API_BASE_URL}/api/logs?${params}`, { headers: authHeaders() });
       if (res.ok) setLogs(await res.json());
     } catch (e) {
       console.error("Failed to fetch logs", e);
@@ -147,7 +155,7 @@ export default function AdminInterface() {
     setSavingProvider(provider);
     try {
       const res = await fetch(`${API_BASE_URL}/api/config/${provider}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
+        method: "PUT", headers: authHeaders(),
         body: JSON.stringify(llmCloudConfig[provider]),
       });
       if (!res.ok) { const e = await res.json(); throw new Error(e.detail); }
@@ -161,7 +169,7 @@ export default function AdminInterface() {
     setSavingLlm(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/config/active`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: authHeaders(),
         body: JSON.stringify({ provider: activeProvider }),
       });
       if (!res.ok) { const e = await res.json(); throw new Error(e.detail); }
@@ -173,7 +181,7 @@ export default function AdminInterface() {
   const fetchDocuments = async () => {
     setLoadingDocs(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/documents`);
+      const res = await fetch(`${API_BASE_URL}/api/documents`, { headers: authHeaders(false) });
       if (res.ok) {
         const data = await res.json();
         setDocuments(data);
@@ -202,7 +210,7 @@ export default function AdminInterface() {
     formData.append("site", newDoc.site);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/documents`, { method: "POST", body: formData });
+      const res = await fetch(`${API_BASE_URL}/api/documents`, { method: "POST", headers: authHeaders(false), body: formData });
       if (res.ok) {
         toastSuccess("Document uploadé et indexé !");
         setNewDoc({ file: null, doc_type: 'Procédure', criticality: 'Medium', version: '1.0', owner: 'QMS', language: 'fr', site: 'default' });
@@ -214,7 +222,7 @@ export default function AdminInterface() {
   const handleDeleteDocument = async (docId: number) => {
     if (!window.confirm("Supprimer ce document ?")) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/documents/${docId}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE_URL}/api/documents/${docId}`, { method: "DELETE", headers: authHeaders(false) });
       if (res.ok) { toastSuccess("Document supprimé."); fetchDocuments(); }
       else { const e = await res.json(); toastError(e.detail); }
     } catch { toastError("Suppression échouée."); }
@@ -223,7 +231,7 @@ export default function AdminInterface() {
   const fetchUsers = async () => {
     setLoadingUsers(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/users`);
+      const res = await fetch(`${API_BASE_URL}/api/users`, { headers: authHeaders(false) });
       if (res.ok) {
         const data = await res.json();
         setUsersList(data);
@@ -239,7 +247,7 @@ export default function AdminInterface() {
     e.preventDefault();
     try {
       const res = await fetch(`${API_BASE_URL}/api/users`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newUser)
+        method: "POST", headers: authHeaders(), body: JSON.stringify(newUser)
       });
       if (res.ok) { toastSuccess("Utilisateur créé !"); setNewUser({ username: '', password: '', role: 'user' }); fetchUsers(); }
       else { const e = await res.json(); toastError(e.detail); }
@@ -249,7 +257,7 @@ export default function AdminInterface() {
   const handleDeleteUser = async (userId: number) => {
     if (!window.confirm("Supprimer cet utilisateur ?")) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/users/${userId}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE_URL}/api/users/${userId}`, { method: "DELETE", headers: authHeaders(false) });
       if (res.ok) { toastSuccess("Utilisateur supprimé."); fetchUsers(); }
       else { const e = await res.json(); toastError(e.detail); }
     } catch { toastError("Suppression échouée."); }

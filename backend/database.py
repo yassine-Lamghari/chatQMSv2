@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, inspect, text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+# Fix #18 — remplace declarative_base() déprécié depuis SQLAlchemy 2.0
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
 import datetime
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./qms_chatbot.db"
@@ -10,7 +10,9 @@ engine = create_engine(
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-Base = declarative_base()
+# Fix #18 : nouvelle syntaxe SQLAlchemy 2.0
+class Base(DeclarativeBase):
+    pass
 
 class User(Base):
     __tablename__ = "users"
@@ -24,7 +26,7 @@ class LLMConfig(Base):
     __tablename__ = "llm_configs"
     id = Column(Integer, primary_key=True, index=True)
     provider = Column(String, unique=True)  # groq, gemini, deepseek, ollama
-    api_key = Column(String, nullable=True)
+    api_key = Column(String, nullable=True)   # Fix #4 : stocké chiffré via crypto_utils
     base_url = Column(String, nullable=True)
     model_name = Column(String, nullable=True)  # e.g. llama3.2 for ollama
 
@@ -80,6 +82,18 @@ class ChatSession(Base):
     messages_json = Column(Text, default="[]")  # JSON array
     updated_at = Column(DateTime, default=datetime.datetime.utcnow)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+# Fix #11 — Pagination : modèle AuditChecklistResult pour sauvegarder les audits
+class AuditResult(Base):
+    """Résultats d'audit sauvegardés pour la checklist interactive (#13)."""
+    __tablename__ = "audit_results"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, nullable=False)
+    standard = Column(String)
+    process = Column(String)
+    checklist_json = Column(Text, default="[]")  # [{question, checked, note}]
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
 def migrate_sqlite_schema():

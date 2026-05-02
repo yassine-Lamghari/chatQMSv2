@@ -20,3 +20,6 @@ fpdf2
 openpyxl
 python-pptx
 bcrypt
+python-jose[cryptography]
+slowapi
+cryptography
