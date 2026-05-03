@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   IconQMS, IconNewChat, IconAudit, IconPFMEA, IconSearch,
-  IconTrash, IconSend, IconAttach, IconLogout, IconChat, IconShield
+  IconTrash, IconSend, IconAttach, IconLogout, IconChat
 } from "./components/Icons";
+import { toastSuccess, toastError } from "./components/Toast";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const CHAT_HISTORY_KEY = "qms_chat_history";
@@ -76,7 +77,7 @@ function ConfidenceBar({ score }: { score?: number }) {
   );
 }
 
-function AssistantBody({ msg, view, locale }: { msg: ChatMessage; view: "summary" | "detail"; locale: string }) {
+const AssistantBody = memo(function AssistantBody({ msg, view, locale }: { msg: ChatMessage; view: "summary" | "detail"; locale: string }) {
   const lbl = L(locale);
   const meta = msg.meta;
   if (!meta) return <p style={{ whiteSpace: "pre-wrap" }}>{msg.content}</p>;
@@ -135,10 +136,13 @@ function AssistantBody({ msg, view, locale }: { msg: ChatMessage; view: "summary
       <ConfidenceBar score={meta.confidence_score} />
     </div>
   );
-}
+});
 
 export default function Chatbot() {
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [sessionSearch, setSessionSearch] = useState("");
   const [messages, setMessages]           = useState<ChatMessage[]>([]);
   const [sessions, setSessions]           = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -157,7 +161,20 @@ export default function Chatbot() {
   const [llmConfigured, setLlmConfigured] = useState<boolean>(true);  // Fix #17
   const router   = useRouter();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const lbl = L(uiLocale);
+
+  // Auto-detect browser language on first load
+  useEffect(() => {
+    const saved = localStorage.getItem("ui_locale");
+    if (saved === "fr" || saved === "en") { setUiLocale(saved); return; }
+    const browserLang = typeof navigator !== "undefined" ? navigator.language.toLowerCase() : "fr";
+    setUiLocale(browserLang.startsWith("en") ? "en" : "fr");
+  }, []);
+
+  // Persist locale on change
+  useEffect(() => { localStorage.setItem("ui_locale", uiLocale); }, [uiLocale]);
 
   useEffect(() => {
     const stored = localStorage.getItem("user");
@@ -193,8 +210,11 @@ export default function Chatbot() {
       });
     // Load active LLM + Fix #17 statut
     fetch(`${API_BASE_URL}/api/llm/status`)
-      .then(r => r.ok ? r.json() : {})
-      .then(d => { setActiveLLM(d?.provider || null); setLlmConfigured(d?.configured ?? true); })
+      .then(r => r.ok ? r.json() : null)
+      .then((d: { provider?: string | null; configured?: boolean } | null) => {
+        setActiveLLM(d?.provider || null);
+        setLlmConfigured(d?.configured ?? true);
+      })
       .catch(() => {});
   }, [router]);
 
@@ -250,6 +270,8 @@ export default function Chatbot() {
   };
 
   const deleteSession = (id: string) => {
+    const confirmMsg = uiLocale === "en" ? "Delete this conversation?" : "Supprimer cette conversation ?";
+    if (!window.confirm(confirmMsg)) return;
     const next = sessions.filter(s => s.id !== id);
     persistSessions(next);
     fetch(`${API_BASE_URL}/api/sessions/${id}`, { method: "DELETE" }).catch(() => {});
@@ -257,9 +279,36 @@ export default function Chatbot() {
       if (next.length > 0) { setActiveSessionId(next[0].id); setMessages(next[0].messages); }
       else { setActiveSessionId(null); setMessages([]); }
     }
+    toastSuccess(uiLocale === "en" ? "Conversation deleted" : "Conversation supprimée");
   };
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Keyboard shortcuts: Ctrl/Cmd+K = new chat, Esc = close panels, / = focus input
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        const id = crypto.randomUUID();
+        const s: ChatSession = { id, title: lbl.newChat, messages: [], updatedAt: new Date().toISOString() };
+        setActiveSessionId(id);
+        setMessages([]);
+        setInput("");
+        persistSessions([s, ...sessions].slice(0, 20));
+        return;
+      }
+      if (e.key === "Escape") {
+        setShowFilters(false);
+        setShowMobileMenu(false);
+        return;
+      }
+      const tag = (document.activeElement?.tagName || "").toUpperCase();
+      if (e.key === "/" && tag !== "INPUT" && tag !== "TEXTAREA") {
+        e.preventDefault();
+        textareaRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [sessions, lbl.newChat]);
 
   if (!user) return (
     <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "var(--color-bg)", color: "var(--color-text-muted)" }}>
@@ -272,14 +321,11 @@ export default function Chatbot() {
   const respondInEnglish = languageMode === "en_only";
   const responseLocale   = languageMode === "en_only" ? "en" : "fr";
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
-    const userMsg: ChatMessage = { role: "user", content: input };
-    const nextUser = [...messages, userMsg];
+  const sendQuery = async (queryText: string, baseMessages: ChatMessage[]) => {
+    const userMsg: ChatMessage = { role: "user", content: queryText };
+    const nextUser = [...baseMessages, userMsg];
     setMessages(nextUser);
     updateCurrentSession(nextUser);
-    const queryText = input;
-    setInput("");
     setIsLoading(true);
 
     const filters: Record<string, string> = {};
@@ -297,14 +343,19 @@ export default function Chatbot() {
           language_mode: languageMode,
           respond_in_english: respondInEnglish,
           response_locale: responseLocale,
-          user_role: user.role,
-          username: user.username,
+          user_role: user!.role,
+          username: user!.username,
           filters,
         }),
       });
+      if (res.status === 401) {
+        localStorage.removeItem("user");
+        router.push("/login");
+        return;
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err?.detail || "Chat request failed");
+        throw new Error(err?.detail || `Chat request failed (${res.status})`);
       }
       const data = await res.json();
       const meta: ChatMeta = {
@@ -322,8 +373,7 @@ export default function Chatbot() {
     } catch (e: any) {
       console.error("Chat request failed", e);
       let errMsg = lbl.errBackend;
-      if (e?.message?.includes("401")) errMsg = uiLocale === "en" ? "API key not configured — check admin settings." : "Clé API non configurée — vérifiez les paramètres admin.";
-      else if (e?.message?.includes("404")) errMsg = uiLocale === "en" ? "No documents indexed yet. Upload files from admin." : "Aucun document indexé. Importez des fichiers depuis l'admin.";
+      if (e?.message?.includes("404")) errMsg = uiLocale === "en" ? "No documents indexed yet. Upload files from admin." : "Aucun document indexé. Importez des fichiers depuis l'admin.";
       else if (e?.message?.includes("429")) errMsg = uiLocale === "en" ? "Too many requests — please wait a moment." : "Trop de requêtes — attendez un instant.";
       const next = [...nextUser, { role: "assistant", content: errMsg }];
       setMessages(next);
@@ -331,6 +381,33 @@ export default function Chatbot() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSend = () => {
+    if (!input.trim() || isLoading) return;
+    const text = input;
+    setInput("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    sendQuery(text, messages);
+  };
+
+  const regenerate = () => {
+    if (isLoading) return;
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") { lastUserIdx = i; break; }
+    }
+    if (lastUserIdx === -1) return;
+    const lastUserMsg = messages[lastUserIdx];
+    const truncated = messages.slice(0, lastUserIdx);
+    sendQuery(lastUserMsg.content, truncated);
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toastSuccess(uiLocale === "en" ? "Copied" : "Copié");
+    } catch { toastError(uiLocale === "en" ? "Copy failed" : "Échec de copie"); }
   };
 
   const initials = user.username.slice(0, 2).toUpperCase();
@@ -343,14 +420,28 @@ export default function Chatbot() {
   ) : null;
 
   return (
-    <div className="claude-theme" style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+    <div className="claude-theme chat-layout" style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
 
       {/* ── Sidebar ── */}
-      <aside className="sidebar">
-        {/* Brand */}
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "6px 12px 12px" }}>
-          <IconQMS size={30} />
-          <span style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-text)", letterSpacing: "-0.01em" }}>QMS Assistant</span>
+      <aside className={`sidebar${showSidebar ? "" : " sidebar--hidden"}`}>
+        {/* Brand + hamburger */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", padding: "6px 8px 12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <IconQMS size={28} />
+            <span style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-text)", letterSpacing: "-0.01em", whiteSpace:"nowrap" }}>QMS Assistant</span>
+          </div>
+          <button
+            className="desktop-hamburger"
+            onClick={() => setShowSidebar(s => !s)}
+            title="Réduire la sidebar"
+            style={{ flexShrink: 0 }}
+          >
+            <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
         </div>
 
         {/* New chat */}
@@ -461,76 +552,120 @@ export default function Chatbot() {
 
       {/* ── Main ── */}
       <main className="chat-main">
+
+        {/* ── Desktop re-open button (only when sidebar is hidden) ── */}
+        {!showSidebar && (
+          <div className="desktop-topbar">
+            <button
+              className="desktop-hamburger"
+              onClick={() => setShowSidebar(true)}
+              title="Afficher la sidebar"
+            >
+              <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <line x1="3" y1="12" x2="21" y2="12"/>
+                <line x1="3" y1="18" x2="21" y2="18"/>
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {/* ── Mobile top bar (hidden on desktop) ── */}
+        <div className="mobile-topbar">
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <button className="mobile-topbar-btn" onClick={() => setShowMobileMenu(true)} title="Menu" aria-label="Ouvrir le menu">
+              <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <line x1="3" y1="12" x2="21" y2="12"/>
+                <line x1="3" y1="18" x2="21" y2="18"/>
+              </svg>
+            </button>
+            <div className="mobile-topbar-brand">
+              <IconQMS size={24} />
+              <span className="mobile-topbar-title">QMS Assistant</span>
+            </div>
+          </div>
+          <button className="mobile-topbar-btn" onClick={startNewChat} title="Nouvelle conversation" id="mobile-new-chat-btn">
+            <IconNewChat size={16} />
+          </button>
+        </div>
+
+        {/* ── Mobile history drawer ── */}
+        {showMobileMenu && (
+          <div className="mobile-drawer-overlay" onClick={() => setShowMobileMenu(false)}>
+            <div className="mobile-drawer" onClick={e => e.stopPropagation()}>
+              <div className="mobile-drawer-header">
+                <span style={{ fontWeight:700, fontSize:15 }}>Historique</span>
+                <button className="mobile-topbar-btn" onClick={() => setShowMobileMenu(false)} aria-label="Fermer">
+                  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+              <button className="mobile-drawer-new" onClick={() => { startNewChat(); setShowMobileMenu(false); }}>
+                <IconNewChat size={15} /> {lbl.newChat}
+              </button>
+              {/* Search */}
+              {sessions.length > 3 && (
+                <div style={{ padding:"10px 12px", borderBottom:"1px solid var(--color-border)", flexShrink:0 }}>
+                  <input
+                    value={sessionSearch}
+                    onChange={e => setSessionSearch(e.target.value)}
+                    placeholder={uiLocale === "en" ? "Search conversations…" : "Rechercher…"}
+                    style={{ width:"100%", padding:"7px 10px", fontSize:13, border:"1px solid var(--color-input-border)", borderRadius:8, background:"var(--color-input-bg)", color:"var(--color-text)", outline:"none", fontFamily:"inherit" }}
+                  />
+                </div>
+              )}
+              <div className="mobile-drawer-list">
+                {sessions.filter(s => !sessionSearch || (s.title || "").toLowerCase().includes(sessionSearch.toLowerCase())).length === 0 && (
+                  <p style={{ fontSize:13, color:"var(--color-text-faint)", padding:"12px 16px" }}>{sessionSearch ? (uiLocale === "en" ? "No match" : "Aucun résultat") : lbl.noRecent}</p>
+                )}
+                {sessions
+                  .filter(s => !sessionSearch || (s.title || "").toLowerCase().includes(sessionSearch.toLowerCase()))
+                  .map(s => (
+                  <button key={s.id}
+                    className={`mobile-drawer-item${s.id === activeSessionId ? " active" : ""}`}
+                    onClick={() => { openSession(s.id); setShowMobileMenu(false); }}
+                  >
+                    <span style={{ flex:1, textAlign:"left", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      {(s.title || lbl.newChat).slice(0, 36)}{(s.title||lbl.newChat).length > 36 ? "…" : ""}
+                    </span>
+                    <button onClick={e => { e.stopPropagation(); deleteSession(s.id); }}
+                      style={{ background:"transparent", border:"none", cursor:"pointer", color:"#9ca3af", padding:"2px 4px", borderRadius:4, flexShrink:0 }}
+                      onMouseEnter={e => (e.currentTarget.style.color="#ef4444")}
+                      onMouseLeave={e => (e.currentTarget.style.color="#9ca3af")}>
+                      <IconTrash size={13} />
+                    </button>
+                  </button>
+                ))}
+              </div>
+              {/* Logout */}
+              <div style={{ borderTop:"1px solid var(--color-border)", padding:"12px 12px", flexShrink:0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:10, padding:"6px 8px", marginBottom:6 }}>
+                  <div className="sidebar-avatar" style={{ width:28, height:28, fontSize:12 }}>{initials}</div>
+                  <span style={{ fontSize:13, fontWeight:500, color:"var(--color-text)", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.username}</span>
+                </div>
+                <button
+                  onClick={() => { localStorage.removeItem("user"); router.push("/login"); }}
+                  style={{ display:"flex", alignItems:"center", gap:8, width:"100%", padding:"9px 12px", border:"none", borderRadius:8, background:"transparent", color:"#ef4444", fontSize:13, fontWeight:500, fontFamily:"inherit", cursor:"pointer", transition:"background 0.15s" }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "#fef2f2")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                >
+                  <IconLogout size={15} /> {lbl.logout}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Fix #17 — Bandeau avertissement LLM */}
         {llmWarning && (
-          <div style={{ background:"#fef3c7", borderBottom:"1px solid #fde68a", padding:"8px 24px", fontSize:12, color:"#92400e", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+          <div style={{ background:"#fef3c7", borderBottom:"1px solid #fde68a", padding:"8px 16px", fontSize:12, color:"#92400e", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
             <span>{llmWarning}</span>
             <a href="/admin" style={{ color:"#b45309", fontWeight:600, marginLeft:"auto", textDecoration:"underline" }}>→ Admin</a>
           </div>
         )}
 
-        {/* Top bar */}
-        <header className="topbar">
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-            {/* View toggle — segmented pill */}
-            <div className="topbar-toggle">
-              {([{v:"summary",l:lbl.viewSummary,id:"view-summary-btn"},{v:"detail",l:lbl.viewDetail,id:"view-detail-btn"}] as const).map(opt => (
-                <button key={opt.v} id={opt.id}
-                  className={chatView === opt.v ? "active" : ""}
-                  onClick={() => setChatView(opt.v as "summary"|"detail")}>
-                  {opt.l}
-                </button>
-              ))}
-            </div>
-
-            {/* Language toggle — segmented pill */}
-            <div className="topbar-toggle">
-              {([
-                { value: "en_only",            label: "EN" },
-                { value: "fr_with_en_sources", label: "FR+EN" },
-              ] as const).map(opt => (
-                <button key={opt.value} id={`lang-mode-${opt.value}`}
-                  className={languageMode === opt.value ? "active" : ""}
-                  onClick={() => setLanguageMode(opt.value)}
-                  title={opt.value === "en_only" ? "English only" : "FR + EN sources"}>
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Filters toggle */}
-            <button id="filters-btn" className={`topbar-btn${showFilters ? " active" : ""}`}
-              onClick={() => setShowFilters(s => !s)}>
-              ⚙ {lbl.filters}
-            </button>
-          </div>
-
-          {/* Model badge pill */}
-          <span style={{ fontSize:12, fontWeight:600, color:"var(--color-accent)", background:"var(--color-pill-bg)",
-            padding:"4px 14px", borderRadius:999, border:"1.5px solid var(--color-pill-border)", letterSpacing:"0.02em" }}>
-            {activeLLM ? activeLLM.charAt(0).toUpperCase() + activeLLM.slice(1) : "RAG"} · QMS
-          </span>
-        </header>
-
-        {/* Filters panel */}
-        {showFilters && (
-          <div style={{ padding: "0 24px" }}>
-            <div className="filters-panel">
-              {[
-                { label: lbl.site, val: filterSite, set: setFilterSite, ph: "default" },
-                { label: lbl.docType, val: filterDocType, set: setFilterDocType, ph: "Procédure" },
-                { label: lbl.dateFrom, val: filterDateFrom, set: setFilterDateFrom, ph: "2024-01-01" },
-                { label: lbl.dateTo, val: filterDateTo, set: setFilterDateTo, ph: "2026-12-31" },
-              ].map(({ label, val, set, ph }) => (
-                <div key={label}>
-                  <label className="filter-label">{label}</label>
-                  <input className="filter-input" value={val} onChange={e => set(e.target.value)} placeholder={ph} />
-                </div>
-              ))}
-            </div>
-            <p style={{ fontSize: "11.5px", color: "var(--color-text-faint)", textAlign: "center", marginTop: "6px", marginBottom: "4px" }}>{lbl.applyFilters}</p>
-          </div>
-        )}
 
         {/* Messages */}
         <div className="messages-area">
@@ -543,46 +678,79 @@ export default function Chatbot() {
                 <h2 style={{ fontSize:24, fontWeight:600, color:"var(--color-text)", letterSpacing:"-0.02em" }}>{lbl.welcome}</h2>
                 <p style={{ fontSize:14, color:"var(--color-text-faint)", maxWidth:380, textAlign:"center" }}>{lbl.welcomeSub}</p>
 
-                {/* ── Action Cards ── */}
-                <div style={{ display:"flex", gap:20, marginTop:36, flexWrap:"wrap", justifyContent:"center" }}>
-                  {([
-                    { href:"/audit",  Icon: IconAudit,  title: uiLocale==="en" ? "QMS Audit"      : "Audit QMS",           desc: uiLocale==="en" ? "Generate checklists & audit plans" : "Checklists & plans d'audit" },
-                    { href:"/pfmea",  Icon: IconPFMEA,  title: uiLocale==="en" ? "PFMEA Generator" : "Générateur PFMEA",    desc: uiLocale==="en" ? "Risk analysis with AI assistance"  : "Analyse des risques IA" },
-                    { href:"/search", Icon: IconSearch, title: uiLocale==="en" ? "Semantic Search" : "Recherche sémantique", desc: uiLocale==="en" ? "Search directly in QMS documents" : "Recherche dans vos documents QMS" },
-                  ]).map(card => (
-                    <Link key={card.href} href={card.href} className="welcome-action-card">
-                      <span className="welcome-action-icon" style={{ color:"#f97316" }}><card.Icon size={22} /></span>
-                      <span>
-                        <span style={{ display:"block", fontSize:14, fontWeight:600, color:"var(--color-text)" }}>{card.title}</span>
-                        <span style={{ display:"block", fontSize:12, color:"var(--color-text-faint)", marginTop:3, lineHeight:1.4 }}>{card.desc}</span>
-                      </span>
-                    </Link>
+                {/* ── Prompt suggestions ── */}
+                <div className="prompt-suggestions">
+                  {(uiLocale === "en"
+                    ? [
+                        "What are the ISO 9001 requirements for document control?",
+                        "Summarize our last internal audit procedure",
+                        "List the critical CCPs in our production process",
+                        "Explain the PFMEA methodology for a new product",
+                      ]
+                    : [
+                        "Quelles sont les exigences ISO 9001 pour la maîtrise documentaire ?",
+                        "Résume notre dernière procédure d'audit interne",
+                        "Liste les CCP critiques dans notre processus de production",
+                        "Explique la méthodologie PFMEA pour un nouveau produit",
+                      ]
+                  ).map((prompt, i) => (
+                    <button key={i} className="prompt-suggestion"
+                      onClick={() => { setInput(prompt); textareaRef.current?.focus(); }}>
+                      {prompt}
+                    </button>
                   ))}
                 </div>
               </div>
             ) : (
-              messages.map((msg, i) => (
-                <div key={i} className={`msg-row ${msg.role}`}>
-                  {msg.role === "assistant" && (
-                    <div className="msg-avatar claude" style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
-                      <IconShield size={16} />
+              messages.map((msg, i) => {
+                const isLastAssistant = msg.role === "assistant" && i === messages.length - 1 && !isLoading;
+                return (
+                  <div key={i} className={`msg-row ${msg.role}`}>
+                    {msg.role === "assistant" && (
+                      <div className="msg-avatar claude" style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
+                        <IconQMS size={22} />
+                      </div>
+                    )}
+                    <div style={{ display:"flex", flexDirection:"column", maxWidth:"100%", flex:1 }}>
+                      <div className={`msg-bubble ${msg.role}`}>
+                        {msg.role === "assistant"
+                          ? <AssistantBody msg={msg} view={chatView} locale={uiLocale} />
+                          : <p style={{ whiteSpace: "pre-wrap" }}>{msg.content}</p>
+                        }
+                      </div>
+                      {isLastAssistant && (
+                        <div className="msg-actions">
+                          <button className="msg-action-btn" onClick={() => copyToClipboard(msg.content)}
+                            aria-label={uiLocale === "en" ? "Copy" : "Copier"}
+                            title={uiLocale === "en" ? "Copy" : "Copier"}>
+                            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="9" y="9" width="13" height="13" rx="2"/>
+                              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                            </svg>
+                            <span>{uiLocale === "en" ? "Copy" : "Copier"}</span>
+                          </button>
+                          <button className="msg-action-btn" onClick={regenerate}
+                            aria-label={uiLocale === "en" ? "Regenerate" : "Régénérer"}
+                            title={uiLocale === "en" ? "Regenerate" : "Régénérer"}>
+                            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M23 4v6h-6M1 20v-6h6"/>
+                              <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                            </svg>
+                            <span>{uiLocale === "en" ? "Regenerate" : "Régénérer"}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  <div className={`msg-bubble ${msg.role}`}>
-                    {msg.role === "assistant"
-                      ? <AssistantBody msg={msg} view={chatView} locale={uiLocale} />
-                      : <p style={{ whiteSpace: "pre-wrap" }}>{msg.content}</p>
-                    }
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
 
             {/* Loading indicator */}
             {isLoading && (
               <div className="msg-row assistant">
                 <div className="msg-avatar claude" style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
-                  <IconShield size={16} />
+                  <IconQMS size={22} />
                 </div>
                 <div className="msg-bubble assistant">
                   <div className="thinking">
@@ -599,9 +767,57 @@ export default function Chatbot() {
 
         {/* Input */}
         <div className="input-area">
+
+          {/* ── Settings panel (floats above input) ── */}
+          {showFilters && (
+            <div className="settings-panel settings-panel--floating">
+              <div className="settings-panel-inner">
+
+                <div className="settings-group">
+                  <span className="settings-label">{uiLocale === "en" ? "View" : "Affichage"}</span>
+                  <div className="topbar-toggle">
+                    {([{v:"summary",l:lbl.viewSummary,id:"view-summary-btn"},{v:"detail",l:lbl.viewDetail,id:"view-detail-btn"}] as const).map(opt => (
+                      <button key={opt.v} id={opt.id} className={chatView === opt.v ? "active" : ""}
+                        onClick={() => setChatView(opt.v as "summary"|"detail")}>{opt.l}</button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="settings-group">
+                  <span className="settings-label">{uiLocale === "en" ? "Language" : "Langue"}</span>
+                  <div className="topbar-toggle">
+                    {([{value:"en_only",label:"EN"},{value:"fr_with_en_sources",label:"FR+EN"}] as const).map(opt => (
+                      <button key={opt.value} id={`lang-mode-${opt.value}`} className={languageMode === opt.value ? "active" : ""}
+                        onClick={() => setLanguageMode(opt.value)}>{opt.label}</button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="settings-group settings-group--filters">
+                  <span className="settings-label">{lbl.filters}</span>
+                  <div className="filters-panel">
+                    {[
+                      { label: lbl.site,     val: filterSite,     set: setFilterSite,     ph: "default" },
+                      { label: lbl.docType,  val: filterDocType,  set: setFilterDocType,  ph: "Procédure" },
+                      { label: lbl.dateFrom, val: filterDateFrom, set: setFilterDateFrom, ph: "2024-01-01" },
+                      { label: lbl.dateTo,   val: filterDateTo,   set: setFilterDateTo,   ph: "2026-12-31" },
+                    ].map(({ label, val, set, ph }) => (
+                      <div key={label}>
+                        <label className="filter-label">{label}</label>
+                        <input className="filter-input" value={val} onChange={e => set(e.target.value)} placeholder={ph} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          )}
+
           <div className="input-wrap">
             {/* Attachment button */}
             <button id="attach-btn"
+              aria-label={uiLocale === "en" ? "Attach document" : "Joindre un document"}
               title={uiLocale === "en" ? "Attach document" : "Joindre un document"}
               onClick={() => fileInputRef.current?.click()}
               style={{
@@ -618,16 +834,39 @@ export default function Chatbot() {
             <textarea
               id="chat-input"
               className="input-box"
+              ref={textareaRef}
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={e => {
+                setInput(e.target.value);
+                const ta = e.currentTarget;
+                ta.style.height = "auto";
+                ta.style.height = Math.min(ta.scrollHeight, 180) + "px";
+              }}
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               placeholder={isLoading ? lbl.placeholderLoading
                 : (uiLocale === "en"
-                  ? "Ask about a QMS procedure, standard, or document…"
-                  : "Posez une question sur une procédure, norme ou document QMS…")}
-              rows={2}
+                  ? "Ask about a QMS procedure, standard, or document…  ( / to focus )"
+                  : "Posez une question sur une procédure, norme ou document QMS…  ( / pour focus )")}
+              rows={1}
               disabled={isLoading}
             />
+            {/* Settings toggle inside input */}
+            <button id="filters-btn"
+              aria-label={uiLocale === "en" ? "Settings" : "Paramètres"}
+              title={uiLocale === "en" ? "Settings" : "Paramètres"}
+              onClick={() => setShowFilters(s => !s)}
+              style={{
+                position:"absolute", right:52, bottom:10,
+                width:34, height:34, borderRadius:10,
+                border:"1px solid var(--color-input-border)",
+                background: showFilters ? "var(--color-accent)" : "var(--color-input-bg)",
+                color: showFilters ? "white" : "var(--color-text-faint)",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                cursor:"pointer", transition:"all 0.15s", fontSize:15,
+              }}
+              onMouseEnter={e => { if (!showFilters) { (e.currentTarget as HTMLElement).style.color="var(--color-accent)"; (e.currentTarget as HTMLElement).style.borderColor="#fed7aa"; } }}
+              onMouseLeave={e => { if (!showFilters) { (e.currentTarget as HTMLElement).style.color="var(--color-text-faint)"; (e.currentTarget as HTMLElement).style.borderColor="var(--color-input-border)"; } }}
+            >⚙</button>
             <button id="send-btn" className="send-btn" onClick={handleSend}
               disabled={isLoading || !input.trim()} aria-label="Send">
               {isLoading ? (
@@ -644,6 +883,27 @@ export default function Chatbot() {
         </div>
 
       </main>
+
+      {/* ── Mobile bottom nav (hidden on desktop) ── */}
+      <nav className="mobile-bottom-nav">
+        <button className="mobile-nav-item active" onClick={startNewChat}>
+          <IconChat size={20} />
+          <span>Chat</span>
+        </button>
+        <Link href="/audit" className="mobile-nav-item">
+          <IconAudit size={20} />
+          <span>Audit</span>
+        </Link>
+        <Link href="/pfmea" className="mobile-nav-item">
+          <IconPFMEA size={20} />
+          <span>PFMEA</span>
+        </Link>
+        <Link href="/search" className="mobile-nav-item">
+          <IconSearch size={20} />
+          <span>{uiLocale === "en" ? "Search" : "Recherche"}</span>
+        </Link>
+      </nav>
+
     </div>
   );
 }

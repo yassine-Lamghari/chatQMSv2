@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { IconQMS } from "../components/Icons";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -50,8 +51,9 @@ export default function Login() {
           <div className="claude-icon" style={{
             width: 52, height: 52, borderRadius: "50%",
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 24, color: "white", fontWeight: 700,
-          }}>Q</div>
+          }}>
+            <IconQMS size={34} />
+          </div>
           <div style={{ textAlign: "center" }}>
             <h1 style={{ fontSize: "22px", fontWeight: 600, color: "var(--color-text)", letterSpacing: "-0.02em" }}>
               QMS Assistant

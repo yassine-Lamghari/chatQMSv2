@@ -54,6 +54,7 @@ export default function AdminInterface() {
   const [savingLlm, setSavingLlm] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState("ollama");
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [ollamaSelectedModel, setOllamaSelectedModel] = useState<string>("");
   const [stats, setStats] = useState<any>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
@@ -107,7 +108,7 @@ export default function AdminInterface() {
       const params = new URLSearchParams({ limit: "200" });
       if (logsFilter.trim()) params.set("action", logsFilter.trim());
       const res = await fetch(`${API_BASE_URL}/api/logs?${params}`, { headers: authHeaders() });
-      if (res.ok) setLogs(await res.json());
+      if (res.ok) { const d = await res.json(); setLogs(Array.isArray(d) ? d : d.items ?? d.logs ?? []); }
     } catch (e) {
       console.error("Failed to fetch logs", e);
     } finally {
@@ -118,8 +119,8 @@ export default function AdminInterface() {
   const fetchLlmConfig = async () => {
     try {
       const [configsRes, activeRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/config`),
-        fetch(`${API_BASE_URL}/api/config/active`),
+        fetch(`${API_BASE_URL}/api/config`, { headers: authHeaders(false) }),
+        fetch(`${API_BASE_URL}/api/config/active`, { headers: authHeaders(false) }),
       ]);
       if (configsRes.ok) {
         const configs = await configsRes.json();
@@ -141,7 +142,7 @@ export default function AdminInterface() {
       }
       if (activeRes.ok) {
         const active = await activeRes.json();
-        if (active?.provider) {
+        if (active?.provider && active.provider !== null) {
           setActiveProvider(active.provider);
           setSelectedProvider(active.provider);
         }
@@ -932,7 +933,7 @@ export default function AdminInterface() {
                           "Moyen": "text-yellow-400", "Medium": "text-yellow-400",
                           "Faible": "text-red-400", "Low": "text-red-400",
                         };
-                        const dt = log.created_at ? new Date(log.created_at) : null;
+                        const dt = (log.timestamp || log.created_at) ? new Date(log.timestamp || log.created_at) : null;
                         return (
                           <tr key={log.id} className="hover:bg-slate-800/30 transition">
                             <td className="px-4 py-3 whitespace-nowrap text-slate-400 text-xs">

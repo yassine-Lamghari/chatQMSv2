@@ -101,7 +101,7 @@ export default function AuditPage() {
   return (
     <div style={{ minHeight:"100vh", background:"var(--color-bg)", color:"var(--color-text)", fontFamily:"var(--font-sans)" }}>
 
-      <header style={{ background:"var(--color-card)", borderBottom:"1px solid var(--color-border)", padding:"16px 32px", display:"flex", alignItems:"center", gap:"16px" }}>
+      <header className="page-header-mobile" style={{ background:"var(--color-card)", borderBottom:"1px solid var(--color-border)" }}>
         <Link href="/" style={{ color:"var(--color-text-muted)", textDecoration:"none", fontSize:14, display:"flex", alignItems:"center", gap:6 }}>
           ← Retour au Chat
         </Link>
@@ -120,13 +120,13 @@ export default function AuditPage() {
         </div>
       )}
 
-      <div style={{ maxWidth:1000, margin:"0 auto", padding:"32px 24px" }}>
+      <div style={{ maxWidth:1000, margin:"0 auto", padding:"24px 16px" }}>
 
         {/* Config card — Fix #16 CSS variables uniformisées */}
         <div style={{ background:"var(--color-card)", border:"1px solid var(--color-border)", borderRadius:16, padding:24, marginBottom:24, boxShadow:"var(--shadow-soft)" }}>
           <h2 style={{ margin:"0 0 20px", fontSize:16, fontWeight:600, color:"var(--color-text)" }}>Paramètres de l'audit</h2>
 
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:16, marginBottom:20 }}>
+          <div className="responsive-grid-3" style={{ marginBottom:20 }}>
             <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
               <label style={labelStyle}>Norme</label>
               <select value={auditStandard} onChange={e => setAuditStandard(e.target.value)} style={inputStyle}>

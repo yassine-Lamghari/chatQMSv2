@@ -2,20 +2,25 @@
 
 export function IconQMS({ size = 24 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
-      {/* Shield shape */}
-      <path d="M16 2L4 7v9c0 6.5 5.1 12.2 12 14 6.9-1.8 12-7.5 12-14V7L16 2z"
-        fill="url(#qms-grad)" opacity={0.15} />
-      <path d="M16 2L4 7v9c0 6.5 5.1 12.2 12 14 6.9-1.8 12-7.5 12-14V7L16 2z"
-        stroke="url(#qms-grad)" strokeWidth={1.8} fill="none" strokeLinejoin="round" />
-      {/* Check mark */}
-      <path d="M11 16.5l3.5 3.5 6.5-7" stroke="#f97316" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-      <defs>
-        <linearGradient id="qms-grad" x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#f97316" />
-          <stop offset="1" stopColor="#fb923c" />
-        </linearGradient>
-      </defs>
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <circle cx="16" cy="16" r="14" fill="#fff7ed" stroke="#fdba74" strokeWidth="1.5" />
+      <g stroke="#fb923c" strokeWidth="1.8" strokeLinecap="round">
+        <path d="M16 10.5V14" />
+        <path d="M20.76 13.25L18.3 14.7" />
+        <path d="M20.76 18.75L18.3 17.3" />
+        <path d="M16 21.5V18" />
+        <path d="M11.24 18.75L13.7 17.3" />
+        <path d="M11.24 13.25L13.7 14.7" />
+      </g>
+      <g fill="#f97316">
+        <circle cx="16" cy="9" r="2.1" />
+        <circle cx="21.2" cy="12" r="2.1" />
+        <circle cx="21.2" cy="20" r="2.1" />
+        <circle cx="16" cy="23" r="2.1" />
+        <circle cx="10.8" cy="20" r="2.1" />
+        <circle cx="10.8" cy="12" r="2.1" />
+      </g>
+      <circle cx="16" cy="16" r="3" fill="#ea580c" />
     </svg>
   );
 }

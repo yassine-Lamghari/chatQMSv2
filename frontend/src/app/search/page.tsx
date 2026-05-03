@@ -93,17 +93,17 @@ export default function SearchPage() {
 
   return (
     <div style={{ minHeight:"100vh", background:"var(--color-bg)", color:"var(--color-text)", fontFamily:"inherit" }}>
-      <header style={{ background:"var(--color-card)", borderBottom:"1px solid var(--color-border)", padding:"14px 28px", display:"flex", alignItems:"center", gap:14 }}>
+      <header className="page-header-mobile" style={{ background:"var(--color-card)", borderBottom:"1px solid var(--color-border)" }}>
         <Link href="/" style={{ color:"var(--color-text-muted)", textDecoration:"none", fontSize:14 }}>← Chat</Link>
         <div style={{ width:1, height:22, background:"var(--color-border)" }} />
         <h1 style={{ fontSize:18, fontWeight:700, margin:0 }}>🔍 Recherche sémantique</h1>
         <span style={{ marginLeft:"auto", fontSize:12, color:"var(--color-text-faint)" }}>{user.username}</span>
       </header>
 
-      <div style={{ maxWidth:900, margin:"0 auto", padding:"32px 20px" }}>
+      <div style={{ maxWidth:900, margin:"0 auto", padding:"20px 14px" }}>
 
         {/* Barre de recherche */}
-        <form onSubmit={handleSearch} style={{ display:"flex", gap:10, marginBottom:12 }}>
+        <form onSubmit={handleSearch} style={{ display:"flex", flexWrap:"wrap", gap:10, marginBottom:12 }}>
           <input
             id="search-input"
             value={query}
