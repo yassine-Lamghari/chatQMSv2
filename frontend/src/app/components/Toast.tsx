@@ -33,9 +33,17 @@ export default function ToastContainer() {
   };
 
   return (
-    <div style={{ position:"fixed", bottom:24, right:24, zIndex:9999, display:"flex", flexDirection:"column", gap:10, pointerEvents:"none" }}>
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      style={{ position:"fixed", bottom:24, right:24, zIndex:9999, display:"flex", flexDirection:"column", gap:10, pointerEvents:"none" }}
+    >
       {toasts.map(t => (
-        <div key={t.id} style={{
+        <div
+          key={t.id}
+          role={t.type === "error" ? "alert" : "status"}
+          style={{
           display:"flex", alignItems:"center", gap:10, padding:"12px 18px",
           borderRadius:12, background:colors[t.type], color:"white",
           fontSize:14, fontWeight:500, boxShadow:"0 4px 20px rgba(0,0,0,0.25)",

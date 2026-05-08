@@ -1,17 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-
-const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-
-// Fix #5 — helper auth headers
-function authHeaders(): Record<string, string> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-  return token
-    ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
-    : { "Content-Type": "application/json" };
-}
+import { apiFetch } from "../lib/api";
+import PageHeader from "../components/PageHeader";
 
 export default function SearchPage() {
   const router = useRouter();
@@ -56,12 +47,10 @@ export default function SearchPage() {
       const hasAdvanced = filterCriticality || filterLanguage || filterOwner || filterDateFrom || filterDateTo;
       const endpoint = hasAdvanced ? "/api/search/advanced" : "/api/search";
 
-      const res = await fetch(`${API}${endpoint}`, {
+      const data = await apiFetch<any>(endpoint, {
         method: "POST",
-        headers: authHeaders(),  // Fix #3 — auth
         body: JSON.stringify(body),
       });
-      const data = await res.json();
       const items = data.hits || [];
       setHits(items);
       setTotal(data.total ?? items.length);
@@ -89,18 +78,18 @@ export default function SearchPage() {
     width: "100%",
   };
 
-  if (!user) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--color-bg)"}}>Chargement…</div>;
+  if (!user) return <div className="centered-screen">Chargement…</div>;
 
   return (
     <div style={{ minHeight:"100vh", background:"var(--color-bg)", color:"var(--color-text)", fontFamily:"inherit" }}>
-      <header className="page-header-mobile" style={{ background:"var(--color-card)", borderBottom:"1px solid var(--color-border)" }}>
-        <Link href="/" style={{ color:"var(--color-text-muted)", textDecoration:"none", fontSize:14 }}>← Chat</Link>
-        <div style={{ width:1, height:22, background:"var(--color-border)" }} />
-        <h1 style={{ fontSize:18, fontWeight:700, margin:0 }}>🔍 Recherche sémantique</h1>
-        <span style={{ marginLeft:"auto", fontSize:12, color:"var(--color-text-faint)" }}>{user.username}</span>
-      </header>
+      <PageHeader
+        title="🔍 Recherche sémantique"
+        backHref="/"
+        backLabel="← Chat"
+        meta={<span>{user.username}</span>}
+      />
 
-      <div style={{ maxWidth:900, margin:"0 auto", padding:"20px 14px" }}>
+      <div className="page-container page-container--narrow">
 
         {/* Barre de recherche */}
         <form onSubmit={handleSearch} style={{ display:"flex", flexWrap:"wrap", gap:10, marginBottom:12 }}>

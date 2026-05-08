@@ -1,16 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-
-function authHeaders(): Record<string, string> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-  return token
-    ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
-    : { "Content-Type": "application/json" };
-}
+import { apiFetch, API_BASE_URL } from "../lib/api";
+import PageHeader from "../components/PageHeader";
 
 // Fix #13 — type checklist interactive
 type ChecklistItem = { question: string; checked: boolean; note: string };
@@ -35,24 +27,26 @@ export default function AuditPage() {
   const [llmStatus, setLlmStatus] = useState<{configured:boolean;message:string}|null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
+    const signal = controller.signal;
     const stored = localStorage.getItem("user");
-    if (!stored) { router.push("/login"); return; }
+    if (!stored) { router.push("/login"); return () => controller.abort(); }
     setUser(JSON.parse(stored));
     // Fix #17 — vérifier LLM au chargement
-    fetch(`${API_BASE_URL}/api/llm/status`).then(r => r.json()).then(setLlmStatus).catch(() => {});
+    apiFetch<any>("/api/llm/status", { auth: false, signal })
+      .then((data) => { if (!signal.aborted) setLlmStatus(data); })
+      .catch(() => {});
+    return () => controller.abort();
   }, [router]);
 
   const handleGenerateAudit = async () => {
     if (!auditProcess.trim()) { setAuditError("Veuillez saisir un processus."); return; }
     setAuditLoading(true); setAuditError(null); setAuditResult(null); setChecklist([]); setSaved(false);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/audit/assistant`, {
+      const data = await apiFetch<any>("/api/audit/assistant", {
         method: "POST",
-        headers: authHeaders(),
         body: JSON.stringify({ standard: auditStandard, process: auditProcess, depth: auditDepth, top_k: 5 }),
       });
-      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || "Erreur serveur"); }
-      const data = await res.json();
       setAuditResult(data);
       // Fix #13 — initialiser la checklist interactive
       const items: ChecklistItem[] = (data.checklist_normative || []).map((q: string) => ({
@@ -74,12 +68,11 @@ export default function AuditPage() {
     if (!user || !checklist.length) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/audit/checklist/save`, {
+      await apiFetch("/api/audit/checklist/save", {
         method: "POST",
-        headers: authHeaders(),
         body: JSON.stringify({ standard: auditStandard, process: auditProcess, checklist, username: user.username }),
       });
-      if (res.ok) { setSaved(true); }
+      setSaved(true);
     } catch { /* silent */ }
     finally { setSaving(false); }
   };
@@ -92,25 +85,17 @@ export default function AuditPage() {
 
   const checkedCount = checklist.filter(c => c.checked).length;
 
-  if (!user) return (
-    <div style={{ height:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"var(--color-bg)", color:"var(--color-text-muted)" }}>
-      Chargement…
-    </div>
-  );
+  if (!user) return <div className="centered-screen">Chargement…</div>;
 
   return (
     <div style={{ minHeight:"100vh", background:"var(--color-bg)", color:"var(--color-text)", fontFamily:"var(--font-sans)" }}>
 
-      <header className="page-header-mobile" style={{ background:"var(--color-card)", borderBottom:"1px solid var(--color-border)" }}>
-        <Link href="/" style={{ color:"var(--color-text-muted)", textDecoration:"none", fontSize:14, display:"flex", alignItems:"center", gap:6 }}>
-          ← Retour au Chat
-        </Link>
-        <div style={{ width:1, height:24, background:"var(--color-border)" }} />
-        <h1 style={{ fontSize:20, fontWeight:700, margin:0, color:"var(--color-text)" }}>
-          🗂 Assistant Audit QMS
-        </h1>
-        <span style={{ marginLeft:"auto", fontSize:12, color:"var(--color-text-faint)" }}>{user.username}</span>
-      </header>
+      <PageHeader
+        title="🗂 Assistant Audit QMS"
+        backHref="/"
+        backLabel="← Retour au Chat"
+        meta={<span>{user.username}</span>}
+      />
 
       {/* Fix #17 — Bandeau statut LLM */}
       {llmStatus && !llmStatus.configured && (
@@ -120,7 +105,7 @@ export default function AuditPage() {
         </div>
       )}
 
-      <div style={{ maxWidth:1000, margin:"0 auto", padding:"24px 16px" }}>
+      <div className="page-container page-container--medium">
 
         {/* Config card — Fix #16 CSS variables uniformisées */}
         <div style={{ background:"var(--color-card)", border:"1px solid var(--color-border)", borderRadius:16, padding:24, marginBottom:24, boxShadow:"var(--shadow-soft)" }}>

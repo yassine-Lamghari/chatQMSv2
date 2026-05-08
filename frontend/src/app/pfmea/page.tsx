@@ -192,7 +192,7 @@ export default function PfmeaPage() {
             <button onClick={handleGenerate} disabled={loading} style={btnPrimary}>
               {loading ? (
                 <span style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <svg className="spin-anim" width={16} height={16} viewBox="0 0 24 24" fill="none">
+                  <svg className="spin" width={16} height={16} viewBox="0 0 24 24" fill="none">
                     <circle cx={12} cy={12} r={10} stroke="white" strokeWidth={3} strokeOpacity={0.3}/>
                     <path d="M12 2a10 10 0 0 1 10 10" stroke="white" strokeWidth={3} strokeLinecap="round"/>
                   </svg>
@@ -309,11 +309,6 @@ export default function PfmeaPage() {
 
       </div>
 
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        .spin-anim { animation: spin 1s linear infinite; }
-        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-      `}</style>
     </div>
   );
 }

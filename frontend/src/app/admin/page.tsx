@@ -4,16 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toastSuccess, toastError } from "../components/Toast";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-
-// Fix #5 — envoyer le JWT dans tous les appels admin
-function authHeaders(json = true): Record<string, string> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-  const base: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-  if (json) base["Content-Type"] = "application/json";
-  return base;
-}
+import { apiFetch, API_BASE_URL } from "../lib/api";
 
 export default function AdminInterface() {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -66,32 +57,39 @@ export default function AdminInterface() {
   const [savingProvider, setSavingProvider] = useState<string | null>(null);
 
   useEffect(() => {
-    if (activeTab === "users") fetchUsers();
-    else if (activeTab === "docs") fetchDocuments();
-    else if (activeTab === "config") { fetchLlmConfig(); fetchOllamaModels(); }
-    else if (activeTab === "logs") fetchLogs();
-    else if (activeTab === "dashboard") fetchStats();
+    const controller = new AbortController();
+    const signal = controller.signal;
+    if (activeTab === "users") fetchUsers(signal);
+    else if (activeTab === "docs") fetchDocuments(signal);
+    else if (activeTab === "config") { fetchLlmConfig(signal); fetchOllamaModels(signal); }
+    else if (activeTab === "logs") fetchLogs(signal);
+    else if (activeTab === "dashboard") fetchStats(signal);
+    return () => controller.abort();
   }, [activeTab]);
 
-  const fetchStats = async () => {
-    try { const r = await fetch(`${API_BASE_URL}/api/stats`); if (r.ok) setStats(await r.json()); } catch {}
+  const fetchStats = async (signal?: AbortSignal) => {
+    try {
+      const data = await apiFetch<any>("/api/stats", { signal });
+      if (!signal?.aborted) setStats(data);
+    } catch {}
   };
 
-  const fetchOllamaModels = async () => {
-    try { const r = await fetch(`${API_BASE_URL}/api/ollama/models`); if (r.ok) { const d = await r.json(); setOllamaModels(d.models || []); } } catch {}
+  const fetchOllamaModels = async (signal?: AbortSignal) => {
+    try {
+      const d = await apiFetch<any>("/api/ollama/models", { signal });
+      if (!signal?.aborted) setOllamaModels(d.models || []);
+    } catch {}
   };
 
   const handleGenerateAudit = async () => {
     if (!auditProcess.trim()) { setAuditError("Veuillez saisir un processus."); return; }
     setAuditLoading(true); setAuditError(null); setAuditResult(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/audit/assistant`, {
+      const data = await apiFetch<any>("/api/audit/assistant", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ standard: auditStandard, process: auditProcess, depth: auditDepth, top_k: 5 }),
       });
-      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || "Erreur serveur"); }
-      setAuditResult(await res.json());
+      setAuditResult(data);
     } catch (e: any) {
       setAuditError(e.message || "Erreur lors de la génération.");
     } finally { setAuditLoading(false); }
@@ -102,50 +100,45 @@ export default function AdminInterface() {
     window.open(`${API_BASE_URL}/api/audit/export?${params}`, "_blank");
   };
 
-  const fetchLogs = async () => {
+  const fetchLogs = async (signal?: AbortSignal) => {
     setLogsLoading(true);
     try {
       const params = new URLSearchParams({ limit: "200" });
       if (logsFilter.trim()) params.set("action", logsFilter.trim());
-      const res = await fetch(`${API_BASE_URL}/api/logs?${params}`, { headers: authHeaders() });
-      if (res.ok) { const d = await res.json(); setLogs(Array.isArray(d) ? d : d.items ?? d.logs ?? []); }
+      const d = await apiFetch<any>(`/api/logs?${params.toString()}`, { signal });
+      if (!signal?.aborted) setLogs(Array.isArray(d) ? d : d.items ?? d.logs ?? []);
     } catch (e) {
       console.error("Failed to fetch logs", e);
     } finally {
-      setLogsLoading(false);
+      if (!signal?.aborted) setLogsLoading(false);
     }
   };
 
-  const fetchLlmConfig = async () => {
+  const fetchLlmConfig = async (signal?: AbortSignal) => {
     try {
-      const [configsRes, activeRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/config`, { headers: authHeaders(false) }),
-        fetch(`${API_BASE_URL}/api/config/active`, { headers: authHeaders(false) }),
+      const [configs, active] = await Promise.all([
+        apiFetch<any[]>("/api/config", { signal }),
+        apiFetch<any>("/api/config/active", { signal }),
       ]);
-      if (configsRes.ok) {
-        const configs = await configsRes.json();
-        setLlmConfigs(configs);
-        const nextCloudConfig = {
-          groq: { api_key: "", base_url: "" },
-          gemini: { api_key: "", base_url: "" },
-          deepseek: { api_key: "", base_url: "" },
-        };
-        for (const cfg of configs) {
-          if (cfg.provider === "groq" || cfg.provider === "gemini" || cfg.provider === "deepseek") {
-            nextCloudConfig[cfg.provider as "groq" | "gemini" | "deepseek"] = {
-              api_key: cfg.api_key || "",
-              base_url: cfg.base_url || "",
-            };
-          }
+      if (signal?.aborted) return;
+      setLlmConfigs(configs);
+      const nextCloudConfig = {
+        groq: { api_key: "", base_url: "" },
+        gemini: { api_key: "", base_url: "" },
+        deepseek: { api_key: "", base_url: "" },
+      };
+      for (const cfg of configs) {
+        if (cfg.provider === "groq" || cfg.provider === "gemini" || cfg.provider === "deepseek") {
+          nextCloudConfig[cfg.provider as "groq" | "gemini" | "deepseek"] = {
+            api_key: cfg.api_key || "",
+            base_url: cfg.base_url || "",
+          };
         }
-        setLlmCloudConfig(nextCloudConfig);
       }
-      if (activeRes.ok) {
-        const active = await activeRes.json();
-        if (active?.provider && active.provider !== null) {
-          setActiveProvider(active.provider);
-          setSelectedProvider(active.provider);
-        }
+      setLlmCloudConfig(nextCloudConfig);
+      if (active?.provider && active.provider !== null) {
+        setActiveProvider(active.provider);
+        setSelectedProvider(active.provider);
       }
     } catch (error) {
       console.error("Failed to fetch LLM config", error);
@@ -155,11 +148,10 @@ export default function AdminInterface() {
   const handleSaveProviderConfig = async (provider: "groq" | "gemini" | "deepseek") => {
     setSavingProvider(provider);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/config/${provider}`, {
-        method: "PUT", headers: authHeaders(),
+      await apiFetch(`/api/config/${provider}`, {
+        method: "PUT",
         body: JSON.stringify(llmCloudConfig[provider]),
       });
-      if (!res.ok) { const e = await res.json(); throw new Error(e.detail); }
       toastSuccess(`Config ${provider} sauvegardée !`);
       fetchLlmConfig();
     } catch (error: any) { toastError(error.message || "Impossible de sauvegarder"); }
@@ -169,28 +161,24 @@ export default function AdminInterface() {
   const handleSetActiveLlm = async () => {
     setSavingLlm(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/config/active`, {
-        method: "POST", headers: authHeaders(),
+      await apiFetch("/api/config/active", {
+        method: "POST",
         body: JSON.stringify({ provider: activeProvider }),
       });
-      if (!res.ok) { const e = await res.json(); throw new Error(e.detail); }
       toastSuccess("LLM actif mis à jour !");
     } catch (error: any) { toastError(error.message || "Impossible de sauvegarder"); }
     finally { setSavingLlm(false); }
   };
 
-  const fetchDocuments = async () => {
+  const fetchDocuments = async (signal?: AbortSignal) => {
     setLoadingDocs(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/documents`, { headers: authHeaders(false) });
-      if (res.ok) {
-        const data = await res.json();
-        setDocuments(data);
-      }
+      const data = await apiFetch<any[]>("/api/documents", { signal });
+      if (!signal?.aborted) setDocuments(data);
     } catch (error) {
       console.error("Failed to fetch documents", error);
     } finally {
-      setLoadingDocs(false);
+      if (!signal?.aborted) setLoadingDocs(false);
     }
   };
 
@@ -211,56 +199,50 @@ export default function AdminInterface() {
     formData.append("site", newDoc.site);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/documents`, { method: "POST", headers: authHeaders(false), body: formData });
-      if (res.ok) {
-        toastSuccess("Document uploadé et indexé !");
-        setNewDoc({ file: null, doc_type: 'Procédure', criticality: 'Medium', version: '1.0', owner: 'QMS', language: 'fr', site: 'default' });
-        setShowUploadForm(false); fetchDocuments();
-      } else { const e = await res.json(); toastError(`Erreur: ${e.detail}`); }
+      await apiFetch<string>("/api/documents", { method: "POST", body: formData, json: false });
+      toastSuccess("Document uploadé et indexé !");
+      setNewDoc({ file: null, doc_type: 'Procédure', criticality: 'Medium', version: '1.0', owner: 'QMS', language: 'fr', site: 'default' });
+      setShowUploadForm(false); fetchDocuments();
     } catch { toastError("Upload échoué."); }
   };
 
   const handleDeleteDocument = async (docId: number) => {
     if (!window.confirm("Supprimer ce document ?")) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/documents/${docId}`, { method: "DELETE", headers: authHeaders(false) });
-      if (res.ok) { toastSuccess("Document supprimé."); fetchDocuments(); }
-      else { const e = await res.json(); toastError(e.detail); }
+      await apiFetch(`/api/documents/${docId}`, { method: "DELETE" });
+      toastSuccess("Document supprimé.");
+      fetchDocuments();
     } catch { toastError("Suppression échouée."); }
   };
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (signal?: AbortSignal) => {
     setLoadingUsers(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/users`, { headers: authHeaders(false) });
-      if (res.ok) {
-        const data = await res.json();
-        setUsersList(data);
-      }
+      const data = await apiFetch<any[]>("/api/users", { signal });
+      if (!signal?.aborted) setUsersList(data);
     } catch (error) {
       console.error("Failed to fetch users", error);
     } finally {
-      setLoadingUsers(false);
+      if (!signal?.aborted) setLoadingUsers(false);
     }
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch(`${API_BASE_URL}/api/users`, {
-        method: "POST", headers: authHeaders(), body: JSON.stringify(newUser)
-      });
-      if (res.ok) { toastSuccess("Utilisateur créé !"); setNewUser({ username: '', password: '', role: 'user' }); fetchUsers(); }
-      else { const e = await res.json(); toastError(e.detail); }
+      await apiFetch("/api/users", { method: "POST", body: JSON.stringify(newUser) });
+      toastSuccess("Utilisateur créé !");
+      setNewUser({ username: '', password: '', role: 'user' });
+      fetchUsers();
     } catch { toastError("Création échouée."); }
   };
 
   const handleDeleteUser = async (userId: number) => {
     if (!window.confirm("Supprimer cet utilisateur ?")) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/users/${userId}`, { method: "DELETE", headers: authHeaders(false) });
-      if (res.ok) { toastSuccess("Utilisateur supprimé."); fetchUsers(); }
-      else { const e = await res.json(); toastError(e.detail); }
+      await apiFetch(`/api/users/${userId}`, { method: "DELETE" });
+      toastSuccess("Utilisateur supprimé.");
+      fetchUsers();
     } catch { toastError("Suppression échouée."); }
   };
 
@@ -856,7 +838,7 @@ export default function AdminInterface() {
                   <p className="text-slate-400 text-sm mt-1">Traçabilité complète — qui a fait quoi et quand.</p>
                 </div>
                 <button
-                  onClick={fetchLogs}
+                  onClick={() => fetchLogs()}
                   className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-4 py-2 text-sm transition"
                 >
                   🔄 Actualiser
@@ -867,14 +849,24 @@ export default function AdminInterface() {
               {logs.length > 0 && (() => {
                 const counts: Record<string, number> = {};
                 logs.forEach(l => { counts[l.action] = (counts[l.action] || 0) + 1; });
-                const colors: Record<string, string> = { chat:"blue", upload:"emerald", delete:"red", audit:"amber", search:"purple" };
+                const actionBadgeClass: Record<string, string> = {
+                  chat: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+                  upload: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+                  delete: "bg-red-500/20 text-red-400 border-red-500/30",
+                  audit: "bg-amber-500/20 text-amber-400 border-amber-500/30",
+                  search: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+                  default: "bg-slate-500/20 text-slate-400 border-slate-500/30",
+                };
                 return (
                   <div className="flex flex-wrap gap-3 mb-4">
-                    {Object.entries(counts).map(([action, count]) => (
-                      <span key={action} className={`text-xs font-semibold px-3 py-1 rounded-full bg-${colors[action] || "slate"}-500/20 text-${colors[action] || "slate"}-400 border border-${colors[action] || "slate"}-500/30`}>
-                        {action} × {count}
-                      </span>
-                    ))}
+                    {Object.entries(counts).map(([action, count]) => {
+                      const badgeClass = actionBadgeClass[action] || actionBadgeClass.default;
+                      return (
+                        <span key={action} className={`text-xs font-semibold px-3 py-1 rounded-full border ${badgeClass}`}>
+                          {action} × {count}
+                        </span>
+                      );
+                    })}
                     <span className="text-xs text-slate-500 ml-auto self-center">{logs.length} entrées</span>
                   </div>
                 );
@@ -894,7 +886,7 @@ export default function AdminInterface() {
                   <option value="audit">Audit</option>
                   <option value="search">Recherche</option>
                 </select>
-                <button onClick={fetchLogs} className="bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm px-4 py-2 rounded-lg transition">
+                <button onClick={() => fetchLogs()} className="bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm px-4 py-2 rounded-lg transition">
                   Filtrer
                 </button>
               </div>

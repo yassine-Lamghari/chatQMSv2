@@ -1,15 +1,8 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-
-// Helper pour les headers auth
-function authHeaders(): Record<string, string> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-  return token ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` } : { "Content-Type": "application/json" };
-}
+import { apiFetch } from "../lib/api";
+import PageHeader from "../components/PageHeader";
 
 export default function LogsPage() {
   const router = useRouter();
@@ -35,34 +28,35 @@ export default function LogsPage() {
   }, [router]);
 
   useEffect(() => {
-    if (user) fetchLogs(1);
+    if (!user) return;
+    const controller = new AbortController();
+    fetchLogs(1, controller.signal);
+    return () => controller.abort();
   }, [user]);
 
-  const fetchLogs = async (p = page) => {
+  const fetchLogs = async (p = page, signal?: AbortSignal) => {
     setLogsLoading(true);
     try {
       const params = new URLSearchParams({ limit: String(PER_PAGE), page: String(p) });
       if (logsFilter.trim()) params.set("action", logsFilter.trim());
       if (userFilter.trim()) params.set("username", userFilter.trim());
-      const res = await fetch(`${API_BASE_URL}/api/logs?${params}`, { headers: authHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        // Support ancien format tableau + nouveau format paginé
-        if (Array.isArray(data)) {
-          setLogs(data);
-          setTotal(data.length);
-          setTotalPages(1);
-        } else {
-          setLogs(data.items || []);
-          setTotal(data.total || 0);
-          setTotalPages(data.pages || 1);
-          setPage(data.page || 1);
-        }
+      const data = await apiFetch<any>(`/api/logs?${params.toString()}`, { signal });
+      if (signal?.aborted) return;
+      // Support ancien format tableau + nouveau format paginé
+      if (Array.isArray(data)) {
+        setLogs(data);
+        setTotal(data.length);
+        setTotalPages(1);
+      } else {
+        setLogs(data.items || []);
+        setTotal(data.total || 0);
+        setTotalPages(data.pages || 1);
+        setPage(data.page || 1);
       }
     } catch (e) {
       console.error("Failed to fetch logs", e);
     } finally {
-      setLogsLoading(false);
+      if (!signal?.aborted) setLogsLoading(false);
     }
   };
 
@@ -81,29 +75,19 @@ export default function LogsPage() {
     return "#ef4444";
   };
 
-  if (!user) return (
-    <div style={{ height:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"var(--color-bg)", color:"var(--color-text-muted)" }}>
-      Chargement…
-    </div>
-  );
+  if (!user) return <div className="centered-screen">Chargement…</div>;
 
   return (
     <div style={{ minHeight:"100vh", background:"var(--color-bg)", color:"var(--color-text)", fontFamily:"var(--font-sans)" }}>
 
-      <header style={{ background:"var(--color-card)", borderBottom:"1px solid var(--color-border)", padding:"16px 32px", display:"flex", alignItems:"center", gap:"16px" }}>
-        <Link href="/" style={{ color:"var(--color-text-muted)", textDecoration:"none", fontSize:14, display:"flex", alignItems:"center", gap:6 }}>
-          ← Retour au Chat
-        </Link>
-        <div style={{ width:1, height:24, background:"var(--color-border)" }} />
-        <h1 style={{ fontSize:20, fontWeight:700, margin:0, color:"var(--color-text)" }}>
-          📋 Logs d'activité
-        </h1>
-        <span style={{ marginLeft:"auto", fontSize:12, color:"var(--color-text-faint)" }}>
-          {total} entrées au total
-        </span>
-      </header>
+      <PageHeader
+        title="📋 Logs d'activité"
+        backHref="/"
+        backLabel="← Retour au Chat"
+        meta={<span>{total} entrées au total</span>}
+      />
 
-      <div style={{ maxWidth:1200, margin:"0 auto", padding:"32px 24px" }}>
+      <div className="page-container">
         <div style={{ background:"var(--color-card)", border:"1px solid var(--color-border)", borderRadius:16, padding:24, boxShadow:"var(--shadow-soft)" }}>
 
           {/* Statistiques rapides */}

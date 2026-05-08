@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   IconQMS, IconNewChat, IconAudit, IconPFMEA, IconSearch,
-  IconTrash, IconSend, IconAttach, IconLogout, IconChat
+  IconTrash, IconSend, IconLogout, IconChat
 } from "./components/Icons";
 import { toastSuccess, toastError } from "./components/Toast";
+import { apiFetch } from "./lib/api";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 const CHAT_HISTORY_KEY = "qms_chat_history";
 
 type ChatMeta = {
@@ -162,7 +162,8 @@ export default function Chatbot() {
   const router   = useRouter();
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const persistTimerRef = useRef<number | null>(null);
+  const persistDbTimerRef = useRef<number | null>(null);
   const lbl = L(uiLocale);
 
   // Auto-detect browser language on first load
@@ -177,15 +178,17 @@ export default function Chatbot() {
   useEffect(() => { localStorage.setItem("ui_locale", uiLocale); }, [uiLocale]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    const signal = controller.signal;
     const stored = localStorage.getItem("user");
-    if (!stored) { router.push("/login"); return; }
+    if (!stored) { router.push("/login"); return () => controller.abort(); }
     const parsed = JSON.parse(stored);
-    if (parsed.role === "admin") { router.push("/admin"); return; }
+    if (parsed.role === "admin") { router.push("/admin"); return () => controller.abort(); }
     setUser(parsed);
     // Load sessions from DB
-    fetch(`${API_BASE_URL}/api/sessions?username=${encodeURIComponent(parsed.username)}`)
-      .then(r => r.ok ? r.json() : [])
+    apiFetch<ChatSession[]>(`/api/sessions?username=${encodeURIComponent(parsed.username)}`, { signal })
       .then((dbSessions: ChatSession[]) => {
+        if (signal.aborted) return;
         if (dbSessions.length > 0) {
           setSessions(dbSessions);
           setActiveSessionId(dbSessions[0].id);
@@ -201,6 +204,7 @@ export default function Chatbot() {
         }
       })
       .catch(() => {
+        if (signal.aborted) return;
         const storedSessions = localStorage.getItem(CHAT_HISTORY_KEY);
         if (storedSessions) {
           const parsed2: ChatSession[] = JSON.parse(storedSessions);
@@ -209,13 +213,15 @@ export default function Chatbot() {
         }
       });
     // Load active LLM + Fix #17 statut
-    fetch(`${API_BASE_URL}/api/llm/status`)
-      .then(r => r.ok ? r.json() : null)
+    apiFetch<{ provider?: string | null; configured?: boolean } | null>("/api/llm/status", { auth: false, signal })
       .then((d: { provider?: string | null; configured?: boolean } | null) => {
+        if (signal.aborted) return;
         setActiveLLM(d?.provider || null);
         setLlmConfigured(d?.configured ?? true);
       })
       .catch(() => {});
+
+    return () => controller.abort();
   }, [router]);
 
   useEffect(() => {
@@ -224,16 +230,26 @@ export default function Chatbot() {
 
   const persistSessions = (next: ChatSession[]) => {
     setSessions(next);
-    localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(next));
+    if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = window.setTimeout(() => {
+      localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(next));
+    }, 250);
   };
 
   const persistSessionToDb = (session: ChatSession, username: string) => {
-    fetch(`${API_BASE_URL}/api/sessions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: session.id, title: session.title, messages: session.messages, username }),
-    }).catch(() => {});
+    if (persistDbTimerRef.current) window.clearTimeout(persistDbTimerRef.current);
+    const payload = { session_id: session.id, title: session.title, messages: session.messages, username };
+    persistDbTimerRef.current = window.setTimeout(() => {
+      apiFetch("/api/sessions", { method: "POST", body: JSON.stringify(payload) }).catch(() => {});
+    }, 400);
   };
+
+  useEffect(() => {
+    return () => {
+      if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
+      if (persistDbTimerRef.current) window.clearTimeout(persistDbTimerRef.current);
+    };
+  }, []);
 
   const updateCurrentSession = (nextMsgs: ChatMessage[]) => {
     const title = nextMsgs.find(m => m.role === "user")?.content?.slice(0, 40) || lbl.newChat;
@@ -274,7 +290,7 @@ export default function Chatbot() {
     if (!window.confirm(confirmMsg)) return;
     const next = sessions.filter(s => s.id !== id);
     persistSessions(next);
-    fetch(`${API_BASE_URL}/api/sessions/${id}`, { method: "DELETE" }).catch(() => {});
+    apiFetch(`/api/sessions/${id}`, { method: "DELETE" }).catch(() => {});
     if (activeSessionId === id) {
       if (next.length > 0) { setActiveSessionId(next[0].id); setMessages(next[0].messages); }
       else { setActiveSessionId(null); setMessages([]); }
@@ -310,11 +326,7 @@ export default function Chatbot() {
     return () => window.removeEventListener("keydown", handler);
   }, [sessions, lbl.newChat]);
 
-  if (!user) return (
-    <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "var(--color-bg)", color: "var(--color-text-muted)" }}>
-      {lbl.loading}
-    </div>
-  );
+  if (!user) return <div className="centered-screen">{lbl.loading}</div>;
 
   // Response language is driven by languageMode, not the UI locale.
   // FR/EN sidebar toggle only affects UI labels.
@@ -335,9 +347,8 @@ export default function Chatbot() {
     if (filterDateTo.trim())   filters.date_to   = filterDateTo.trim();
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/chat`, {
+      const data = await apiFetch<any>("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: queryText,
           language_mode: languageMode,
@@ -348,16 +359,6 @@ export default function Chatbot() {
           filters,
         }),
       });
-      if (res.status === 401) {
-        localStorage.removeItem("user");
-        router.push("/login");
-        return;
-      }
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err?.detail || `Chat request failed (${res.status})`);
-      }
-      const data = await res.json();
       const meta: ChatMeta = {
         summary: data.summary, summary_bullets: data.summary_bullets,
         details: data.details, detail_sections: data.detail_sections,
@@ -371,10 +372,11 @@ export default function Chatbot() {
       setMessages(next);
       updateCurrentSession(next);
     } catch (e: any) {
+      if (e?.message === "unauthorized") return;
       console.error("Chat request failed", e);
       let errMsg = lbl.errBackend;
-      if (e?.message?.includes("404")) errMsg = uiLocale === "en" ? "No documents indexed yet. Upload files from admin." : "Aucun document indexé. Importez des fichiers depuis l'admin.";
-      else if (e?.message?.includes("429")) errMsg = uiLocale === "en" ? "Too many requests — please wait a moment." : "Trop de requêtes — attendez un instant.";
+      if (e?.status === 404) errMsg = uiLocale === "en" ? "No documents indexed yet. Upload files from admin." : "Aucun document indexé. Importez des fichiers depuis l'admin.";
+      else if (e?.status === 429) errMsg = uiLocale === "en" ? "Too many requests — please wait a moment." : "Trop de requêtes — attendez un instant.";
       const next = [...nextUser, { role: "assistant", content: errMsg }];
       setMessages(next);
       updateCurrentSession(next);
@@ -433,6 +435,7 @@ export default function Chatbot() {
           <button
             className="desktop-hamburger"
             onClick={() => setShowSidebar(s => !s)}
+            aria-label={uiLocale === "en" ? "Toggle sidebar" : "Afficher ou masquer la sidebar"}
             title="Réduire la sidebar"
             style={{ flexShrink: 0 }}
           >
@@ -499,6 +502,7 @@ export default function Chatbot() {
                   {hoveredSession === s.id && (
                     <button
                       onClick={e => { e.stopPropagation(); deleteSession(s.id); }}
+                      aria-label={uiLocale === "en" ? "Delete conversation" : "Supprimer la conversation"}
                       title="Supprimer"
                       style={{
                         position:"absolute", right:8, top:"50%", transform:"translateY(-50%)",
@@ -559,6 +563,7 @@ export default function Chatbot() {
             <button
               className="desktop-hamburger"
               onClick={() => setShowSidebar(true)}
+              aria-label={uiLocale === "en" ? "Open sidebar" : "Ouvrir la sidebar"}
               title="Afficher la sidebar"
             >
               <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
@@ -585,7 +590,13 @@ export default function Chatbot() {
               <span className="mobile-topbar-title">QMS Assistant</span>
             </div>
           </div>
-          <button className="mobile-topbar-btn" onClick={startNewChat} title="Nouvelle conversation" id="mobile-new-chat-btn">
+          <button
+            className="mobile-topbar-btn"
+            onClick={startNewChat}
+            title="Nouvelle conversation"
+            aria-label={uiLocale === "en" ? "New chat" : "Nouvelle conversation"}
+            id="mobile-new-chat-btn"
+          >
             <IconNewChat size={16} />
           </button>
         </div>
@@ -631,6 +642,7 @@ export default function Chatbot() {
                       {(s.title || lbl.newChat).slice(0, 36)}{(s.title||lbl.newChat).length > 36 ? "…" : ""}
                     </span>
                     <button onClick={e => { e.stopPropagation(); deleteSession(s.id); }}
+                      aria-label={uiLocale === "en" ? "Delete conversation" : "Supprimer la conversation"}
                       style={{ background:"transparent", border:"none", cursor:"pointer", color:"#9ca3af", padding:"2px 4px", borderRadius:4, flexShrink:0 }}
                       onMouseEnter={e => (e.currentTarget.style.color="#ef4444")}
                       onMouseLeave={e => (e.currentTarget.style.color="#9ca3af")}>
@@ -799,12 +811,18 @@ export default function Chatbot() {
                     {[
                       { label: lbl.site,     val: filterSite,     set: setFilterSite,     ph: "default" },
                       { label: lbl.docType,  val: filterDocType,  set: setFilterDocType,  ph: "Procédure" },
-                      { label: lbl.dateFrom, val: filterDateFrom, set: setFilterDateFrom, ph: "2024-01-01" },
-                      { label: lbl.dateTo,   val: filterDateTo,   set: setFilterDateTo,   ph: "2026-12-31" },
-                    ].map(({ label, val, set, ph }) => (
+                      { label: lbl.dateFrom, val: filterDateFrom, set: setFilterDateFrom, type: "date" },
+                      { label: lbl.dateTo,   val: filterDateTo,   set: setFilterDateTo,   type: "date" },
+                    ].map(({ label, val, set, ph, type }) => (
                       <div key={label}>
                         <label className="filter-label">{label}</label>
-                        <input className="filter-input" value={val} onChange={e => set(e.target.value)} placeholder={ph} />
+                        <input
+                          className="filter-input"
+                          type={type || "text"}
+                          value={val}
+                          onChange={e => set(e.target.value)}
+                          placeholder={ph}
+                        />
                       </div>
                     ))}
                   </div>
@@ -815,22 +833,6 @@ export default function Chatbot() {
           )}
 
           <div className="input-wrap">
-            {/* Attachment button */}
-            <button id="attach-btn"
-              aria-label={uiLocale === "en" ? "Attach document" : "Joindre un document"}
-              title={uiLocale === "en" ? "Attach document" : "Joindre un document"}
-              onClick={() => fileInputRef.current?.click()}
-              style={{
-                position:"absolute", left:10, bottom:10,
-                width:34, height:34, borderRadius:10,
-                border:"1px solid var(--color-input-border)", background:"var(--color-input-bg)",
-                color:"var(--color-text-faint)", display:"flex", alignItems:"center",
-                justifyContent:"center", cursor:"pointer", transition:"all 0.15s",
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color="var(--color-accent)"; (e.currentTarget as HTMLElement).style.borderColor="#fed7aa"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color="var(--color-text-faint)"; (e.currentTarget as HTMLElement).style.borderColor="var(--color-input-border)"; }}
-            ><IconAttach size={16} /></button>
-            <input ref={fileInputRef} type="file" style={{ display:"none" }} />
             <textarea
               id="chat-input"
               className="input-box"
