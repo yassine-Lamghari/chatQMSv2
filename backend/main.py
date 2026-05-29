@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Query, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -37,6 +37,7 @@ from rag import (
     SUPPORTED_EXTENSIONS,
     EMBEDDING_MODEL_NAME,
     CHROMA_PERSIST_DIR,
+    IMAGES_DIR,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,6 +215,7 @@ def require_admin(authorization: Optional[str] = Header(None)) -> dict:
 
 @app.on_event("startup")
 def on_startup():
+    import threading
     init_db()
     db = SessionLocal()
     try:
@@ -226,16 +228,20 @@ def on_startup():
         EMBEDDING_MODEL_NAME,
         CHROMA_PERSIST_DIR,
     )
-    # Pré-chargement du modèle d'embedding au démarrage pour éviter le délai
-    # sur la première requête utilisateur (le modèle peut prendre 1-2 min à charger).
-    try:
-        from rag import get_embeddings, get_vector_store
-        logger.warning("RAG: pré-chargement du modèle d'embedding en mémoire...")
-        get_embeddings()
-        get_vector_store()
-        logger.warning("RAG: modèle pret !")
-    except Exception as _e:
-        logger.error("RAG: echec du pre-chargement -- %s", _e)
+    # Pré-chargement du modèle d'embedding en ARRIÈRE-PLAN pour ne pas bloquer
+    # le démarrage du serveur (le modèle fait ~457 MB et peut prendre 1-2 min à charger).
+    def _preload_models():
+        try:
+            from rag import get_embeddings, get_vector_store
+            logger.warning("RAG: pré-chargement du modèle d'embedding en mémoire (arrière-plan)...")
+            get_embeddings()
+            get_vector_store()
+            logger.warning("RAG: modèle pret !")
+        except Exception as _e:
+            logger.error("RAG: echec du pre-chargement -- %s", _e)
+
+    t = threading.Thread(target=_preload_models, daemon=True, name="rag-preload")
+    t.start()
 
 
 def _section_ref(doc) -> str:
@@ -308,6 +314,21 @@ def _not_found_payload(locale: str):
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the QMS Chatbot API"}
+
+
+@app.get("/api/images/{doc_id}/{filename}")
+def serve_image(doc_id: str, filename: str):
+    """Serve an extracted image/diagram from a PDF document."""
+    import re
+    # Security: only allow safe filenames
+    if not re.match(r'^[\w\-]+\.(?:png|jpg|jpeg|gif|webp|bmp)$', filename, re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if not re.match(r'^\d+$', doc_id):
+        raise HTTPException(status_code=400, detail="Invalid doc_id")
+    img_path = os.path.join(IMAGES_DIR, doc_id, filename)
+    if not os.path.isfile(img_path):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(img_path, media_type="image/png")
 
 
 # Fix #17 — Indicateur de statut LLM pour l'UI
@@ -415,6 +436,27 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
     query = payload.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+    # Check if the query specifically requests a figure/diagram number (e.g., "Figure 1", "Fig 2")
+    import re
+    fig_match = re.search(r'\b(?:figure|fig\.?)\s*(\d+)\b', query, re.IGNORECASE)
+    fig_patterns = None
+    if fig_match:
+        fig_num = fig_match.group(1)
+        fig_patterns = [
+            f"figure {fig_num}",
+            f"fig. {fig_num}",
+            f"fig {fig_num}"
+        ]
+
+    # Check if the query has keywords related to figures/diagrams/images
+    query_lower = query.lower()
+    has_image_keywords = any(kw in query_lower for kw in [
+        "figure", "fig", "schema", "schéma", "diagramme", "diagram", 
+        "illustration", "graphique", "chart", "image", "photo", "dessin", 
+        "architecture", "plan", "carte", "mapping"
+    ])
+
     top_k = max(1, min(payload.top_k, 8))
     locale = (payload.response_locale or "fr").lower()
     user_role = (payload.user_role or "user").strip().lower()
@@ -434,7 +476,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
 
     retrievals = search_similar_chunks(
         query=query,
-        k=min(top_k * 2, 16),
+        k=16,
         metadata_filter=metadata_filter if metadata_filter else None,
     )
 
@@ -494,9 +536,73 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
     distance_values = []
     freshness_scores = []
     detail_sections = []
-    for doc, score in rag_hits[:10]:
-        distance_values.append(score)
+    image_results = []  # collected image chunks from RAG
+    for doc, score in rag_hits[:16]:
         meta = doc.metadata or {}
+        # --- Image chunk: collect separately, don't add to text context ---
+        if meta.get("type") == "image":
+            if has_image_keywords:
+                image_url_path = meta.get("image_url_path", "")
+                if image_url_path:
+                    image_results.append({
+                        "url": f"/api/images/{image_url_path}",
+                        "page": meta.get("page"),
+                        "filename": meta.get("filename", ""),
+                        "doc_id": str(meta.get("doc_id", "")),
+                        "relevance": round(math.exp(-score), 4),
+                    })
+            continue  # skip text processing for image chunks
+
+        # --- Dynamic lookup for images on the same page of this document ---
+        if has_image_keywords:
+            chunk_text_lower = doc.page_content.lower()
+            is_fig_candidate = False
+            if fig_patterns:
+                if any(pat in chunk_text_lower for pat in fig_patterns):
+                    is_fig_candidate = True
+            else:
+                has_chunk_fig_ref = any(kw in chunk_text_lower for kw in [
+                    "figure", "fig", "schema", "schéma", "diagramme", "diagram", 
+                    "illustration", "graphique", "chart"
+                ])
+                if has_chunk_fig_ref:
+                    is_fig_candidate = True
+
+            if is_fig_candidate:
+                source_doc_id = str(meta.get("doc_id", "unknown"))
+                page_num = meta.get("page")
+                if source_doc_id.isdigit() and page_num is not None:
+                    # Check physical page before (page_num), physical page current (page_num + 1), and physical page after (page_num + 2)
+                    pages_to_check = [page_num, page_num + 1, page_num + 2]
+                    doc_img_dir = os.path.join(IMAGES_DIR, source_doc_id)
+                    if os.path.isdir(doc_img_dir):
+                        try:
+                            files = os.listdir(doc_img_dir)
+                            has_new_format = any(f.startswith("page_") for f in files)
+                            for filename in files:
+                                # Deduplicate old/new format
+                                if has_new_format and filename.startswith("pdf_"):
+                                    continue
+                                
+                                for p in pages_to_check:
+                                    is_match = False
+                                    if filename.startswith(f"page_{p}_img_"):
+                                        is_match = True
+                                    elif filename.startswith(f"pdf_p{p}_img"):
+                                        is_match = True
+                                    
+                                    if is_match:
+                                        image_results.append({
+                                            "url": f"/api/images/{source_doc_id}/{filename}",
+                                            "page": p,
+                                            "filename": meta.get("filename", ""),
+                                            "doc_id": source_doc_id,
+                                            "relevance": round(math.exp(-score), 4),
+                                        })
+                        except Exception as e:
+                            logger.warning("Error scanning images for doc_id=%s page=%s: %s", source_doc_id, page_num, e)
+
+        distance_values.append(score)
         source_doc_id = str(meta.get("doc_id", "unknown"))
         db_doc = db.query(DocumentMetadata).filter(DocumentMetadata.id == int(source_doc_id)).first() if source_doc_id.isdigit() else None
         uploaded_at = db_doc.uploaded_at if db_doc else None
@@ -558,8 +664,12 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
     excerpt_summary_bullets = excerpt_summary_bullets[:10]
 
     relevance_values = [math.exp(-d) for d in distance_values]
-    avg_relevance = sum(relevance_values) / max(len(relevance_values), 1)
-    best_relevance = max(relevance_values) if relevance_values else 0.0
+    all_relevance_values = list(relevance_values)
+    for img in image_results:
+        all_relevance_values.append(img["relevance"])
+
+    avg_relevance = sum(all_relevance_values) / max(len(all_relevance_values), 1)
+    best_relevance = max(all_relevance_values) if all_relevance_values else 0.0
     if best_relevance < MIN_RELEVANCE_THRESHOLD:
         return {
             "summary": (
@@ -608,12 +718,24 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
     )
     generation_mode = "excerpts"
     rag_synthesis: str | None = None
-    summary_text = (
-        f"Answer based strictly on indexed documents for: {query}"
-        if respond_english
-        else f"Réponse basée uniquement sur la base documentaire pour: {query}"
-    )
-    summary_bullets = list(excerpt_summary_bullets)
+    if not context_snippets and image_results:
+        summary_text = (
+            "Here are the diagrams or figures matching your query."
+            if respond_english
+            else "Voici les diagrammes ou figures correspondant à votre recherche."
+        )
+        summary_bullets = [
+            "- Click on the image to view or enlarge it."
+            if respond_english
+            else "- Cliquez sur l'image pour l'afficher ou l'agrandir."
+        ]
+    else:
+        summary_text = (
+            f"Answer based strictly on indexed documents for: {query}"
+            if respond_english
+            else f"Réponse basée uniquement sur la base documentaire pour: {query}"
+        )
+        summary_bullets = list(excerpt_summary_bullets)
 
     active_p, api_k, base_u, ollama_m = _active_llm_settings(db)
     can_llm = bool(
@@ -666,6 +788,15 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         )
         details_body = f"{syn_intro}\n\n{rag_synthesis}\n\n---\n\n{detail_intro}\n\n{combined_context}"
 
+    # Deduplicate images
+    seen_imgs = set()
+    unique_images = []
+    for img in image_results:
+        key = img["url"]
+        if key not in seen_imgs:
+            seen_imgs.add(key)
+            unique_images.append(img)
+
     result = {
         "summary": summary_text,
         "summary_bullets": summary_bullets,
@@ -676,6 +807,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         "sources": unique_sources,
         "rag_synthesis": rag_synthesis,
         "generation_mode": generation_mode,
+        "images": unique_images,
     }
 
     _log_activity(

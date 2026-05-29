@@ -203,7 +203,10 @@ export default function AdminInterface() {
       toastSuccess("Document uploadé et indexé !");
       setNewDoc({ file: null, doc_type: 'Procédure', criticality: 'Medium', version: '1.0', owner: 'QMS', language: 'fr', site: 'default' });
       setShowUploadForm(false); fetchDocuments();
-    } catch { toastError("Upload échoué."); }
+    } catch (err: any) {
+      const msg = err?.message || "Upload échoué.";
+      toastError(`❌ ${msg}`);
+    }
   };
 
   const handleDeleteDocument = async (docId: number) => {

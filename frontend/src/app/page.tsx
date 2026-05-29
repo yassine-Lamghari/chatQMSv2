@@ -22,6 +22,7 @@ type ChatMeta = {
   sources?: { filename?: string; section_ref?: string; relevance?: number }[];
   rag_synthesis?: string | null;
   generation_mode?: string;
+  images?: { url: string; page?: number; filename?: string; doc_id?: string; relevance?: number }[];
 };
 
 type ChatMessage = { role: string; content: string; meta?: ChatMeta };
@@ -82,6 +83,8 @@ const AssistantBody = memo(function AssistantBody({ msg, view, locale }: { msg: 
   const meta = msg.meta;
   if (!meta) return <p style={{ whiteSpace: "pre-wrap" }}>{msg.content}</p>;
 
+  const images = meta.images || [];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
       {/* Main summary */}
@@ -126,11 +129,51 @@ const AssistantBody = memo(function AssistantBody({ msg, view, locale }: { msg: 
         </>
       )}
 
+      {/* ── Image Gallery ── */}
+      {images.length > 0 && (
+        <div style={{ marginTop: 4 }}>
+          <p style={{ fontSize: "12px", fontWeight: 600, color: "var(--color-text-faint)", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 6 }}>
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            {locale === "en" ? "Diagrams & Figures" : "Diagrammes & Figures"}
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
+            {images.map((img, i) => (
+              <a
+                key={i}
+                href={`http://localhost:8000${img.url}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: "block", borderRadius: 10, overflow: "hidden", border: "1px solid var(--color-border)", background: "var(--color-bg-subtle, #f9fafb)", transition: "box-shadow 0.2s", textDecoration: "none" }}
+                onMouseEnter={e => (e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.12)")}
+                onMouseLeave={e => (e.currentTarget.style.boxShadow = "none")}
+                title={locale === "en" ? `Click to enlarge — Page ${img.page}` : `Cliquer pour agrandir — Page ${img.page}`}
+              >
+                <img
+                  src={`http://localhost:8000${img.url}`}
+                  alt={locale === "en" ? `Figure page ${img.page}` : `Figure page ${img.page}`}
+                  style={{ width: "100%", height: 150, objectFit: "contain", display: "block", background: "#fff" }}
+                  loading="lazy"
+                />
+                <div style={{ padding: "6px 10px 8px", fontSize: 11, color: "var(--color-text-faint)", borderTop: "1px solid var(--color-border)" }}>
+                  <span style={{ fontWeight: 600 }}>{locale === "en" ? "Page" : "Page"} {img.page}</span>
+                  {img.filename && <span style={{ marginLeft: 4, opacity: 0.7 }}>· {img.filename.length > 22 ? img.filename.slice(0, 22) + "…" : img.filename}</span>}
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Meta footer */}
       <div className="assistant-meta">
         <span>{lbl.conf}: <strong>{meta.confidence ?? "—"}</strong></span>
         <span>·</span>
         <span>{lbl.src}: {meta.sources?.length ?? 0}</span>
+        {images.length > 0 && <span>· 🖼 {images.length}</span>}
         {meta.generation_mode && <span>· {meta.generation_mode === "llm" ? "RAG + LLM" : "RAG"}</span>}
       </div>
       <ConfidenceBar score={meta.confidence_score} />
@@ -365,6 +408,7 @@ export default function Chatbot() {
         confidence: data.confidence, confidence_score: data.confidence_score,
         sources: data.sources,
         rag_synthesis: data.rag_synthesis ?? null, generation_mode: data.generation_mode,
+        images: data.images ?? [],
       };
       const content = `${data.summary || ""}\n\n${(data.summary_bullets || []).join("\n")}\n\n${data.details || ""}`;
       const aiMsg: ChatMessage = { role: "assistant", content, meta };
