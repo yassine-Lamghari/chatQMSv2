@@ -1,0 +1,87 @@
+/* QMS Chatbot v2 — Custom ReadTheDocs CSS */
+
+/* Primary brand color */
+:root {
+  --qms-primary: #1e293b;
+  --qms-accent: #0ea5e9;
+  --qms-success: #10b981;
+  --qms-warning: #f59e0b;
+  --qms-danger: #ef4444;
+}
+
+/* Header background */
+.wy-nav-top {
+  background: var(--qms-primary) !important;
+}
+
+/* Sidebar */
+.wy-side-nav-search {
+  background: var(--qms-primary) !important;
+}
+
+.wy-side-nav-search input[type=text] {
+  border-color: var(--qms-accent) !important;
+}
+
+/* Links */
+a {
+  color: var(--qms-accent) !important;
+}
+
+a:hover {
+  color: #38bdf8 !important;
+}
+
+/* Code blocks */
+div[class^="highlight"] {
+  border-left: 3px solid var(--qms-accent);
+  border-radius: 0 4px 4px 0;
+}
+
+/* Note/warning/tip boxes */
+.admonition.note {
+  border-left-color: var(--qms-accent) !important;
+}
+.admonition.tip {
+  border-left-color: var(--qms-success) !important;
+}
+.admonition.warning {
+  border-left-color: var(--qms-warning) !important;
+}
+.admonition.danger, .admonition.caution {
+  border-left-color: var(--qms-danger) !important;
+}
+
+/* Tables */
+table.docutils {
+  border-collapse: collapse;
+  width: 100%;
+}
+table.docutils th {
+  background: var(--qms-primary);
+  color: #f1f5f9;
+  padding: 8px 12px;
+}
+table.docutils td {
+  padding: 6px 12px;
+  border: 1px solid #e2e8f0;
+}
+table.docutils tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+/* Version badge */
+.rst-content .badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75em;
+  font-weight: bold;
+  margin-right: 4px;
+}
+
+/* Copy button */
+button.copybtn {
+  background: var(--qms-primary) !important;
+  color: #fff !important;
+}
