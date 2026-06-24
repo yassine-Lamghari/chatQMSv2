@@ -1,0 +1,921 @@
+\documentclass[12pt,a4paper]{article}
+
+%──────────────────────────────────────────────────────────────────────────────
+% PACKAGES
+%──────────────────────────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath, amssymb}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+\usepackage{microtype}
+\usepackage{lmodern}
+\usepackage{caption}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds}
+
+\geometry{
+  left=2.5cm, right=2.5cm,
+  top=3cm, bottom=2.5cm,
+  headheight=14pt
+}
+
+%──────────────────────────────────────────────────────────────────────────────
+% COULEURS
+%──────────────────────────────────────────────────────────────────────────────
+\definecolor{primary}{RGB}{31,78,121}
+\definecolor{secondary}{RGB}{68,114,196}
+\definecolor{accent}{RGB}{237,125,49}
+\definecolor{lightblue}{RGB}{235,241,251}
+\definecolor{codebg}{RGB}{245,245,245}
+\definecolor{codegreen}{RGB}{0,128,0}
+\definecolor{codegray}{RGB}{128,128,128}
+\definecolor{codered}{RGB}{180,0,0}
+\definecolor{success}{RGB}{0,128,0}
+\definecolor{warning}{RGB}{200,120,0}
+\definecolor{danger}{RGB}{180,0,0}
+
+%──────────────────────────────────────────────────────────────────────────────
+% STYLE CODE
+%──────────────────────────────────────────────────────────────────────────────
+\lstdefinestyle{pythonstyle}{
+  backgroundcolor=\color{codebg},
+  commentstyle=\color{codegreen}\itshape,
+  keywordstyle=\color{primary}\bfseries,
+  stringstyle=\color{codered},
+  basicstyle=\ttfamily\small,
+  breakatwhitespace=false,
+  breaklines=true,
+  keepspaces=true,
+  numbers=left,
+  numbersep=5pt,
+  numberstyle=\tiny\color{codegray},
+  showspaces=false,
+  showstringspaces=false,
+  showtabs=false,
+  tabsize=2,
+  frame=single,
+  rulecolor=\color{secondary!40},
+  language=Python
+}
+
+\lstdefinestyle{promptstyle}{
+  backgroundcolor=\color{lightblue},
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  keepspaces=true,
+  frame=single,
+  rulecolor=\color{primary!40},
+  xleftmargin=10pt,
+  xrightmargin=10pt,
+}
+
+%──────────────────────────────────────────────────────────────────────────────
+% EN-TETE / PIED DE PAGE
+%──────────────────────────────────────────────────────────────────────────────
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{primary}QMS Chatbot RAG -- Rapport Technique}
+\fancyhead[R]{\small\color{primary}2024}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+%──────────────────────────────────────────────────────────────────────────────
+% TITRES
+%──────────────────────────────────────────────────────────────────────────────
+\titleformat{\section}
+  {\Large\bfseries\color{primary}}
+  {\thesection}{1em}{}[\color{primary}\rule{\linewidth}{0.4pt}]
+
+\titleformat{\subsection}
+  {\large\bfseries\color{secondary}}
+  {\thesubsection}{1em}{}
+
+\titleformat{\subsubsection}
+  {\normalsize\bfseries\color{accent}}
+  {\thesubsubsection}{1em}{}
+
+%──────────────────────────────────────────────────────────────────────────────
+% BOITES
+%──────────────────────────────────────────────────────────────────────────────
+\tcbuselibrary{skins, breakable}
+
+\newtcolorbox{infobox}[1][]{
+  colback=lightblue, colframe=primary,
+  title=#1, fonttitle=\bfseries\color{white},
+  colbacktitle=primary,
+  breakable, enhanced
+}
+
+\newtcolorbox{promptbox}[1][]{
+  colback=lightblue!60, colframe=secondary,
+  title=#1, fonttitle=\bfseries\small,
+  colbacktitle=secondary,
+  breakable, enhanced,
+  left=8pt, right=8pt
+}
+
+\newtcolorbox{warningbox}[1][]{
+  colback=orange!10, colframe=warning,
+  title=#1, fonttitle=\bfseries\color{warning},
+  breakable, enhanced
+}
+
+%──────────────────────────────────────────────────────────────────────────────
+% DOCUMENT
+%──────────────────────────────────────────────────────────────────────────────
+\begin{document}
+
+%──── Page de titre ─────────────────────────────────────────────────────────
+\begin{titlepage}
+  \centering
+  \vspace*{2cm}
+
+  {\color{primary}\rule{\linewidth}{2pt}}
+  \vspace{1cm}
+
+  {\Huge\bfseries\color{primary}
+    QMS Chatbot RAG\\[0.4em]
+    \Large\color{secondary}
+    Systeme de Gestion Documentaire Qualite\\
+    par Intelligence Artificielle Generative
+  }
+
+  \vspace{1cm}
+  {\color{primary}\rule{\linewidth}{2pt}}
+
+  \vspace{1.5cm}
+
+  {\large\bfseries Rapport Technique d'Evaluation}\\[0.5em]
+  {\normalsize Reponse aux observations de l'evaluateur}
+
+  \vfill
+
+  \begin{tabular}{ll}
+    \textbf{Architecture} & FastAPI + Next.js + ChromaDB \\
+    \textbf{Modele d'embeddings} & paraphrase-multilingual-MiniLM-L12-v2 \\
+    \textbf{LLM supportes} & Groq, Gemini, DeepSeek, Ollama \\
+    \textbf{Norme cible} & ISO 9001:2015 \\
+    \textbf{Date} & Juin 2024 \\
+  \end{tabular}
+
+  \vspace{2cm}
+
+  {\color{primary}\rule{\linewidth}{1pt}}
+\end{titlepage}
+
+%──── Table des matieres ─────────────────────────────────────────────────────
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{Introduction et Contexte du Projet}
+%======================================================================
+
+\subsection{Problematique}
+
+Dans les organisations soumises a la norme \textbf{ISO 9001:2015}, la gestion documentaire
+constitue un pilier fondamental du Systeme de Management de la Qualite (SMQ). Les operateurs,
+auditeurs et responsables qualite doivent pouvoir acceder rapidement aux procedures,
+specifications et enregistrements qualite disperses dans des formats heterogenes
+(PDF, Word, Excel, PowerPoint).
+
+La problematique centrale est la suivante : comment permettre a un utilisateur non-expert
+de \textbf{retrouver instantanement l'information pertinente} dans un corpus documentaire
+qualite volumineux, tout en \textbf{garantissant que la reponse est fidele aux documents}
+et non inventee par le systeme ?
+
+\subsection{Solution proposee : Architecture RAG}
+
+Notre solution repose sur l'architecture \textbf{RAG} (Retrieval-Augmented Generation),
+qui combine :
+
+\begin{enumerate}
+  \item \textbf{Retrieval} : Recherche des passages documentaires les plus pertinents
+        par similarite semantique
+  \item \textbf{Augmentation} : Construction d'un contexte enrichi a partir des passages retrouves
+  \item \textbf{Generation} : Synthese d'une reponse coherente par un LLM, \emph{strictement
+        limitee au contexte fourni}
+\end{enumerate}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=1.2cm and 1.5cm,
+  box/.style={rectangle, rounded corners, draw=primary, fill=lightblue,
+              text width=2.8cm, align=center, minimum height=1cm, font=\small},
+  arrow/.style={-Stealth, thick, color=primary}
+]
+  \node[box] (query) {Question\\utilisateur};
+  \node[box, right=of query] (embed) {Embedding\\(MiniLM)};
+  \node[box, right=of embed] (chroma) {ChromaDB\\Vector Store};
+  \node[box, right=of chroma] (chunks) {Top-k\\Chunks};
+  \node[box, below=of chunks] (prompt) {Prompt\\Structure};
+  \node[box, left=of prompt] (llm) {LLM\\(Groq/Gemini)};
+  \node[box, left=of llm] (response) {Reponse\\+ Sources};
+
+  \draw[arrow] (query) -- (embed);
+  \draw[arrow] (embed) -- (chroma);
+  \draw[arrow] (chroma) -- (chunks);
+  \draw[arrow] (chunks) -- (prompt);
+  \draw[arrow] (prompt) -- (llm);
+  \draw[arrow] (llm) -- (response);
+\end{tikzpicture}
+\caption{Architecture RAG du systeme QMS Chatbot}
+\label{fig:rag-architecture}
+\end{figure}
+
+%======================================================================
+\section{Point 1 -- Corpus Documentaire Teste}
+%======================================================================
+
+\subsection{Formats Supportes}
+
+Le systeme prend en charge 6 types de fichiers correspondant aux formats couramment
+utilises dans les environnements qualite industriels :
+
+\begin{table}[h]
+\centering
+\caption{Formats de documents supportes et methode d'extraction}
+\begin{tabular}{>{\bfseries}lllll}
+\toprule
+Format & Extension & Bibliotheque & Granularite & Teste \\
+\midrule
+PDF (texte natif) & \texttt{.pdf} & PyPDFLoader & Page & \color{success}$\checkmark$ \\
+PDF (images) & \texttt{.pdf} & PyMuPDF (fitz) & Image/page & \color{warning}Partiel \\
+Word & \texttt{.docx, .doc} & Docx2txtLoader & Document & \color{success}$\checkmark$ \\
+Excel & \texttt{.xlsx, .xls} & openpyxl & Par feuille & \color{success}$\checkmark$ \\
+PowerPoint & \texttt{.pptx, .ppt} & python-pptx & Par slide & \color{success}$\checkmark$ \\
+Image & \texttt{.png, .jpg} & Indexation desc. & Image & \color{success}$\checkmark$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Corpus de Test Fourni}
+
+Le dossier \texttt{docs\_test/} contient 5 documents generes avec des donnees QMS realistes :
+
+\begin{infobox}[Corpus documentaire -- dossier \texttt{docs\_test/}]
+\begin{description}
+  \item[\texttt{procedure\_qualite\_ISO9001.pdf}] Procedure qualite complete ISO 9001:2015
+    (8 sections : objet, references normatives, responsabilites, KPI, gestion des NC,
+    enregistrements). Criticite : \textbf{High}.
+  \item[\texttt{checklist\_audit\_ISO9001.docx}] Checklist d'audit interne par clause
+    ISO 9001:2015 (clauses 4 a 10, tableau Conforme/NC/NA). Criticite : \textbf{Medium}.
+  \item[\texttt{plan\_controle\_qualite.xlsx}] Plan de controle qualite (11 etapes de
+    production, caracteristiques, tolerances, instruments) + tableau KPI 2024.
+    Criticite : \textbf{High}.
+  \item[\texttt{formation\_qualite\_ISO9001.pptx}] Support de formation (6 slides :
+    7 principes QM, PDCA, gestion des NC, KPI, evaluation). Criticite : \textbf{Low}.
+  \item[\texttt{schema\_processus\_qualite.png}] Schema de processus qualite (image indexee
+    comme chunk descriptif). Criticite : \textbf{Low}.
+\end{description}
+\end{infobox}
+
+\subsection{Processus d'Ingestion}
+
+\begin{lstlisting}[style=pythonstyle, caption={Fonction d'ingestion multi-format (rag.py)}]
+def ingest_document(file_path: str, doc_id: int, metadata: dict):
+    """Extrait le texte, chunke, et indexe dans ChromaDB."""
+    _, ext = os.path.splitext(file_path)
+    ext = ext.lower()
+
+    if ext == ".pdf":
+        loader = PyPDFLoader(file_path)
+        documents = loader.load()
+    elif ext in [".docx", ".doc"]:
+        loader = Docx2txtLoader(file_path)
+        documents = loader.load()
+    elif ext in [".xlsx", ".xls"]:
+        documents = _load_excel(file_path)  # Par feuille
+    elif ext in [".pptx", ".ppt"]:
+        documents = _load_pptx(file_path)  # Par slide
+
+    # Chunking QMS-friendly (preserves paragraphes)
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=900,
+        chunk_overlap=220,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+    chunks = text_splitter.split_documents(documents)
+    vector_store.add_documents(chunks)
+\end{lstlisting}
+
+%======================================================================
+\section{Point 2 -- Jeu de Questions-Reponses d'Evaluation}
+%======================================================================
+
+\subsection{Structure du Jeu d'Evaluation}
+
+Le fichier \texttt{evaluation/qa\_evaluation.csv} contient \textbf{18 questions} :
+
+\begin{table}[h]
+\centering
+\caption{Repartition du jeu d'evaluation}
+\begin{tabular}{llr}
+\toprule
+Categorie & Document cible & Nb questions \\
+\midrule
+Procedure qualite ISO 9001 & \texttt{procedure\_qualite.pdf} & 6 \\
+Checklist d'audit & \texttt{checklist\_audit.docx} & 2 \\
+Formation qualite & \texttt{formation\_qualite.pptx} & 3 \\
+Plan de controle / KPI & \texttt{plan\_controle.xlsx} & 4 \\
+Multi-documents & PDF + DOCX & 1 \\
+\textbf{Hors-contexte} & --- (test anti-hallucination) & \textbf{2} \\
+\midrule
+\textbf{Total} & & \textbf{18} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Format du Fichier CSV}
+
+\begin{table}[h]
+\centering
+\caption{Colonnes du jeu d'evaluation}
+\begin{tabular}{lp{8cm}}
+\toprule
+\textbf{Colonne} & \textbf{Description} \\
+\midrule
+\texttt{Question} & Question posee en langage naturel \\
+\texttt{Document\_attendu} & Nom du fichier cible attendu \\
+\texttt{Passage\_attendu} & Extrait exact du texte pertinent \\
+\texttt{Reponse\_attendue} & Reponse de reference \\
+\texttt{Reponse\_chatbot} & A completer lors des tests \\
+\texttt{Score} & Note attribuee (0 a 1) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Exemples de Questions-Reponses}
+
+\begin{table}[h]
+\centering
+\caption{Extrait du jeu d'evaluation (3 exemples)}
+\small
+\begin{tabular}{>{\raggedright}p{4.5cm}
+                >{\raggedright}p{3cm}
+                >{\raggedright\arraybackslash}p{5cm}}
+\toprule
+\textbf{Question} & \textbf{Doc. attendu} & \textbf{Reponse attendue} \\
+\midrule
+Quel est le delai max pour traiter une NC ? &
+procedure\_qualite.pdf &
+30 jours (action corrective definie, mise en oeuvre et verifiee) \\
+\addlinespace
+Seuil de validation de la formation ? &
+formation\_qualite.pptx &
+14/20 (70\%) -- attestation delivree si score $\geq$ 70\% \\
+\addlinespace
+\textit{Quel est le prix des matieres premieres ?} &
+\textit{--- (hors contexte)} &
+\textit{Information non disponible dans les documents QMS} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{Point 3 -- Mesure de la Pertinence du Retrieval}
+%======================================================================
+
+\subsection{Architecture de Recherche Hybride}
+
+Le systeme combine trois methodes via la \textbf{Reciprocal Rank Fusion (RRF)} :
+
+\begin{enumerate}
+  \item \textbf{Recherche vectorielle} par similarite cosinus (ChromaDB)
+  \item \textbf{BM25} pour la correspondance de mots-cles exacts
+  \item \textbf{Cross-encoder} (optionnel, desactive par defaut)
+\end{enumerate}
+
+\subsubsection{Modele d'Embeddings}
+
+\begin{table}[h]
+\centering
+\caption{Caracteristiques du modele d'embeddings}
+\begin{tabular}{ll}
+\toprule
+\textbf{Parametre} & \textbf{Valeur} \\
+\midrule
+Modele & \texttt{paraphrase-multilingual-MiniLM-L12-v2} \\
+Taille & 457 MB \\
+Dimension vecteur & 384 \\
+Langues & 50+ (FR, EN, AR...) \\
+Normalisation & $\ell_2$ (cosinus normalise) \\
+Taille des chunks & 900 caracteres, overlap 220 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Score de Similarite et Seuils}
+
+La pertinence d'un chunk est calculee a partir de la distance cosinus :
+
+\begin{equation}
+\text{relevance}(d, q) = e^{-\text{dist\_cosinus}(d, q)}
+\label{eq:relevance}
+\end{equation}
+
+\begin{table}[h]
+\centering
+\caption{Correspondance distance cosinus / score de pertinence}
+\begin{tabular}{rrl}
+\toprule
+\textbf{Distance cosinus} & \textbf{Score pertinence} & \textbf{Interpretation} \\
+\midrule
+0.0 & 1.000 & Identique \\
+0.5 & 0.607 & Tres similaire \\
+1.0 & 0.368 & Similaire \\
+1.5 & 0.223 & Faiblement similaire \\
+\textbf{2.35} & \textbf{0.095} & \textbf{Seuil minimum (filtre)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{lstlisting}[style=pythonstyle, caption={Seuils de pertinence (main.py)}]
+MAX_DISTANCE_THRESHOLD = 2.35   # Distance cosinus maximale
+MIN_RELEVANCE_THRESHOLD = 0.12  # exp(-distance) minimal
+\end{lstlisting}
+
+\subsubsection{Algorithme BM25}
+
+Le score BM25 pour un terme $t$ dans un document $d$ de longueur $|d|$ est :
+
+\begin{equation}
+\text{BM25}(d, t) = \text{IDF}(t) \cdot
+\frac{tf_{t,d} \cdot (k_1 + 1)}{tf_{t,d} + k_1 \cdot \left(1 - b + b \cdot \frac{|d|}{|d|_{\text{avg}}}\right)}
+\label{eq:bm25}
+\end{equation}
+
+avec $k_1 = 1.5$, $b = 0.75$ et :
+
+\begin{equation}
+\text{IDF}(t) = \log\!\left(1 + \frac{N - df_t + 0.5}{df_t + 0.5}\right)
+\end{equation}
+
+\subsubsection{Reciprocal Rank Fusion}
+
+\begin{equation}
+\text{RRF}(d) = \sum_{r \in \{\text{vector}, \text{BM25}\}} \frac{1}{60 + \text{rank}_r(d)}
+\label{eq:rrf}
+\end{equation}
+
+Distance finale blendee :
+
+\begin{equation}
+\text{dist\_finale}(d) = 0.7 \cdot \text{dist\_cosinus}(d) + 0.3 \cdot \text{pseudo\_dist\_RRF}(d)
+\label{eq:blend}
+\end{equation}
+
+\subsection{Score de Confiance Global}
+
+\begin{equation}
+\text{confidence} = 0.5 \cdot \bar{r} + 0.3 \cdot s_c + 0.2 \cdot s_f
+\label{eq:confidence}
+\end{equation}
+
+ou $\bar{r}$ est la pertinence moyenne des chunks, $s_c$ la couverture des sources
+et $s_f$ la fraicheur des documents.
+
+\begin{table}[h]
+\centering
+\caption{Niveaux de confiance}
+\begin{tabular}{cll}
+\toprule
+\textbf{Score} & \textbf{Niveau} & \textbf{Signification} \\
+\midrule
+$\geq 0.70$ & \textcolor{success}{\textbf{High}} & Reponse bien ancree dans les documents \\
+$\geq 0.45$ & \textcolor{warning}{\textbf{Medium}} & Reponse partielle ou contexte limite \\
+$< 0.45$ & \textcolor{danger}{\textbf{Low}} & Contexte insuffisant ou hors-domaine \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Metriques d'Evaluation}
+
+\subsubsection{Top-k Accuracy}
+
+\begin{equation}
+\text{Top-}k\text{ Accuracy} =
+\frac{\bigl|\{q \in Q \mid \text{doc\_attendu}(q) \in \text{Top-}k(q)\}\bigr|}{|Q|}
+\label{eq:topk}
+\end{equation}
+
+\begin{table}[h]
+\centering
+\caption{Objectifs de performance du retrieval}
+\begin{tabular}{lll}
+\toprule
+\textbf{Metrique} & \textbf{k} & \textbf{Objectif} \\
+\midrule
+Top-1 Accuracy & 1 & $\geq 60\%$ \\
+Top-3 Accuracy & 3 & $\geq 80\%$ \\
+Top-5 Accuracy & 5 & $\geq 90\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Recall@k}
+
+\begin{equation}
+\text{Recall@}k = \frac{|\text{passages pertinents dans Top-}k|}{|\text{passages pertinents totaux}|}
+\label{eq:recall}
+\end{equation}
+
+\subsubsection{Cas sans Contexte Pertinent}
+
+Quand aucun chunk ne depasse le seuil de pertinence minimum :
+
+\begin{enumerate}
+  \item La liste de chunks pertinents est vide $\Rightarrow$ aucun appel LLM
+  \item La reponse contient \texttt{answer\_in\_context: false}
+  \item Le frontend affiche : \textit{"Information non disponible dans les documents indexes"}
+  \item Le niveau de confiance est force a \textbf{Low}
+\end{enumerate}
+
+%======================================================================
+\section{Point 4 -- Controle Anti-Hallucination}
+%======================================================================
+
+\subsection{Vue d'Ensemble}
+
+\begin{table}[h]
+\centering
+\caption{Mecanismes anti-hallucination -- synthese}
+\begin{tabular}{lll}
+\toprule
+\textbf{Mecanisme} & \textbf{Emplacement} & \textbf{Role} \\
+\midrule
+Prompt context-only & \texttt{llm\_rag.py} & Interdit les connaissances propres du LLM \\
+Interdiction d'inventer & \texttt{llm\_rag.py} & Mention explicite dans le prompt \\
+Flag \texttt{answer\_in\_context} & \texttt{llm\_rag.py} & Signalement hors-contexte \\
+Seuil distance cosinus & \texttt{main.py} & Bloque les chunks non pertinents \\
+Temperature 0,15 & \texttt{llm\_rag.py} & Reduit la creativite du LLM \\
+Citations $[1][2]$ & Prompt + rendu & Tracabilite source par source \\
+Fallback extraits bruts & \texttt{main.py} & Securite en cas d'echec LLM \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Prompt Systeme Exact (Francais)}
+
+\begin{promptbox}[Prompt systeme RAG -- version francaise (llm\_rag.py, lignes 182-191)]
+\begin{verbatim}
+Tu es un assistant documentation QMS. Tu utilises UNIQUEMENT les
+passages CONTEXT ci-dessous (numeros [1], [2], ...).
+N'invente pas d'exigences, numeros de procedure ou donnees
+absentes du CONTEXT.
+Si le CONTEXT ne permet pas de repondre, mets answer_in_context
+a false et explique-le clairement dans summary.
+Reponds par un seul objet JSON, sans balises markdown,
+cles exactement :
+{
+  "summary": string,
+  "summary_bullets": array of strings,
+  "details": string,
+  "answer_in_context": boolean
+}
+summary : 2-4 phrases.
+summary_bullets : 3-8 points courts.
+details : synthese structuree en citant les sources [1], [2], etc.
+Redige tout en francais.
+\end{verbatim}
+\end{promptbox}
+
+\subsection{Prompt Systeme Exact (Anglais)}
+
+\begin{promptbox}[Prompt systeme RAG -- version anglaise (llm\_rag.py, lignes 170-179)]
+\begin{verbatim}
+You are a QMS documentation assistant. You ONLY use the CONTEXT
+passages below (indexed [1], [2], ...).
+Do not invent procedures, numbers, or requirements not present
+in CONTEXT.
+If CONTEXT does not answer the question, set answer_in_context
+to false and say so clearly in summary.
+Reply with a single JSON object, no markdown fences, keys exactly:
+{
+  "summary": string,
+  "summary_bullets": array of strings,
+  "details": string,
+  "answer_in_context": boolean
+}
+summary: 2-4 sentences.
+summary_bullets: 3-8 concise points.
+details: structured synthesis referencing sources [1], [2]...
+Write everything in English.
+\end{verbatim}
+\end{promptbox}
+
+\subsection{Structure JSON de Sortie}
+
+\begin{lstlisting}[style=pythonstyle, caption={Parsing et validation de la reponse LLM}]
+def synthesize_from_context(...) -> dict | None:
+    raw = invoke_llm(provider, system_prompt=system,
+                     user_prompt=user)
+    parsed = parse_llm_json(raw)
+
+    if not parsed:
+        return None  # Fallback sur extraits bruts
+
+    answer_in_context = parsed.get("answer_in_context", True)
+    # Si False -> confidence force a LOW cote backend
+
+    return {
+        "summary": parsed["summary"],
+        "summary_bullets": parsed["summary_bullets"],
+        "details": parsed["details"],
+        "answer_in_context": answer_in_context,
+    }
+\end{lstlisting}
+
+\subsection{Exemple de Reponse Hors-Contexte}
+
+\begin{infobox}[Exemple -- Question hors du domaine documentaire]
+\textbf{Question} : \textit{``Quel est le prix des matieres premieres ?''}
+
+\medskip
+\textbf{Reponse JSON generee} :
+\begin{verbatim}
+{
+  "summary": "Cette information n'est pas disponible dans les
+              documents de management qualite indexes.",
+  "summary_bullets": ["Aucun document ne contient d'information
+                       sur les prix des matieres premieres."],
+  "details": "Les documents indexes couvrent uniquement les
+              procedures ISO 9001, checklists et plans de controle.
+              Aucun passage ne traite des prix ou des couts.",
+  "answer_in_context": false
+}
+\end{verbatim}
+
+\textbf{Affichage frontend} : Badge \textcolor{danger}{\textbf{Confiance : Faible}} +
+message explicatif a l'utilisateur.
+\end{infobox}
+
+%======================================================================
+\section{Point 5 -- Droits d'Acces}
+%======================================================================
+
+\subsection{Architecture Multi-Niveau}
+
+Le controle d'acces est organise en 6 niveaux successifs :
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=0.6cm,
+  step/.style={rectangle, draw=primary, fill=lightblue,
+               rounded corners, text width=10cm,
+               minimum height=0.9cm, align=center, font=\small}
+]
+  \node[step] (l1) {\textbf{[1] Authentification JWT} --
+    Token Bearer HS256, expire apres 8h};
+  \node[step, below=of l1] (l2) {\textbf{[2] Role utilisateur} --
+    \texttt{admin} (complet) ou \texttt{user} (lecture)};
+  \node[step, below=of l2] (l3) {\textbf{[3] Retrieval ChromaDB} --
+    Filtre metadata (site, type, langue, version)};
+  \node[step, below=of l3] (l4) {\textbf{[4] Criticite documentaire} --
+    \texttt{critical} bloque pour les \texttt{user}};
+  \node[step, below=of l4] (l5) {\textbf{[5] Envoi LLM} --
+    Uniquement les chunks autorises};
+  \node[step, below=of l5] (l6) {\textbf{[6] Audit trail} --
+    Log complet dans \texttt{activity\_logs}};
+\end{tikzpicture}
+\caption{Niveaux de controle d'acces}
+\end{figure}
+
+\subsection{Matrice des Droits par Role}
+
+\begin{table}[h]
+\centering
+\caption{Permissions par role}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Action} & \textbf{user} & \textbf{admin} \\
+\midrule
+Interroger le chatbot & \color{success}$\checkmark$ & \color{success}$\checkmark$ \\
+Recherche documentaire & \color{success}$\checkmark$ & \color{success}$\checkmark$ \\
+Audit checklist ISO 9001 & \color{success}$\checkmark$ & \color{success}$\checkmark$ \\
+Documents non-critiques & \color{success}$\checkmark$ & \color{success}$\checkmark$ \\
+Documents \textbf{Critical} & \color{danger}$\times$ & \color{success}$\checkmark$ \\
+Uploader des documents & \color{danger}$\times$ & \color{success}$\checkmark$ \\
+Configurer les LLM & \color{danger}$\times$ & \color{success}$\checkmark$ \\
+Gerer les utilisateurs & \color{danger}$\times$ & \color{success}$\checkmark$ \\
+Consulter les logs d'audit & \color{danger}$\times$ & \color{success}$\checkmark$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Controle par Criticite}
+
+\begin{lstlisting}[style=pythonstyle, caption={Filtre criticite (main.py)}]
+def _can_access_criticality(user_role: str,
+                             criticality: str) -> bool:
+    """Les documents 'critical' sont reserves aux admins."""
+    if user_role == "admin":
+        return True
+    c = (criticality or "").strip().lower()
+    if c == "critical":
+        return False  # Acces refuse
+    return True
+\end{lstlisting}
+
+\subsection{Multi-Tenant par Site}
+
+\begin{lstlisting}[style=pythonstyle, caption={Isolation multi-tenant (database.py)}]
+class User(Base):
+    role = Column(String, default="user")     # admin | user
+    site = Column(String, default="default")  # "usine_nord"
+
+class DocumentMetadata(Base):
+    criticality = Column(String)  # Low|Medium|High|Critical
+    site = Column(String, default="default")
+\end{lstlisting}
+
+Un utilisateur du site \texttt{usine\_nord} ne voit pas les documents du site
+\texttt{siege}. Le filtrage est effectue via le \texttt{metadata\_filter} de ChromaDB :
+
+\begin{lstlisting}[style=pythonstyle]
+metadata_filter = {"site": current_user["site"]}
+results = search_similar_chunks(query, k=4,
+                                 metadata_filter=metadata_filter)
+\end{lstlisting}
+
+\subsection{Chiffrement des Cles API}
+
+Les cles API des providers LLM (Groq, Gemini, DeepSeek) sont chiffrees
+via \textbf{Fernet} (AES-128-CBC) avant stockage en base de donnees :
+
+\begin{equation}
+\text{stockage} = \text{Fernet}_{K_\text{enc}}(\text{cle\_api})
+\end{equation}
+
+Les cles ne sont jamais retournees en clair par l'API (masquees en \texttt{"***"}).
+
+\subsection{Audit Trail}
+
+\begin{table}[h]
+\centering
+\caption{Colonnes de la table \texttt{activity\_logs}}
+\begin{tabular}{ll}
+\toprule
+\textbf{Colonne} & \textbf{Description} \\
+\midrule
+\texttt{username} & Utilisateur ayant effectue la requete \\
+\texttt{action} & Type : \texttt{chat\_query}, \texttt{search}, ... \\
+\texttt{query} & Question posee \\
+\texttt{document\_ids} & IDs des documents retrouves \\
+\texttt{confidence} & Niveau : High / Medium / Low \\
+\texttt{confidence\_score} & Score numerique \\
+\texttt{response\_summary} & Resume de la reponse \\
+\texttt{created\_at} & Horodatage \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section{Point 6 -- Structure du Depot GitHub}
+%======================================================================
+
+\subsection{Arborescence Reorganisee}
+
+\begin{verbatim}
+chatQMSv2/
+|-- README.md                         [NOUVEAU] Documentation principale
+|-- start_servers.bat                 Script demarrage Windows
+|-- generate_test_docs.py             Generateur du corpus de test
+|
+|-- backend/                          API FastAPI
+|   |-- main.py                       1641 lignes -- routes + auth + RAG
+|   |-- rag.py                        Retrieval hybride (Vector+BM25+RRF)
+|   |-- llm_rag.py                    Synthese LLM + anti-hallucination
+|   |-- database.py                   Modeles SQLAlchemy (SQLite)
+|   |-- auth.py                       JWT encode/decode
+|   |-- crypto_utils.py               Chiffrement Fernet cles API
+|   |-- requirements.txt              Dependencies Python (26 packages)
+|   `-- .env.example                  Template variables d'environnement
+|
+|-- frontend/                         Next.js 16 (TypeScript)
+|   `-- src/
+|
+|-- docs_test/                        [NOUVEAU] Corpus de 5 documents
+|   |-- procedure_qualite_ISO9001.pdf
+|   |-- checklist_audit_ISO9001.docx
+|   |-- plan_controle_qualite.xlsx
+|   |-- formation_qualite_ISO9001.pptx
+|   |-- schema_processus_qualite.png
+|   `-- README_corpus.md
+|
+|-- evaluation/                       [NOUVEAU] Evaluation RAG
+|   |-- qa_evaluation.csv             18 questions-reponses annotees
+|   |-- evaluate_retrieval.py         Script metriques (Top-k, Recall)
+|   `-- retrieval_metrics.md          Documentation des metriques
+|
+`-- docs/                             [NOUVEAU] Documentation technique
+    |-- anti_hallucination.md         Mecanismes anti-hallucination
+    `-- access_control.md             Controle des droits d'acces
+\end{verbatim}
+
+\subsection{Contenu du README Principal}
+
+Le fichier \texttt{README.md} a la racine contient :
+
+\begin{enumerate}
+  \item Description du projet et fonctionnalites
+  \item Schemas d'architecture ASCII
+  \item Prerequis systeme (Python 3.10+, Node.js 18+)
+  \item Instructions d'installation pas-a-pas
+  \item Commandes de demarrage Windows et Linux/Mac
+  \item Tableau des formats de documents supportes
+  \item Guide d'importation du corpus de test
+  \item Description du jeu d'evaluation RAG
+  \item Resume du controle d'acces et des droits
+  \item Documentation API REST (lien Swagger)
+\end{enumerate}
+
+%======================================================================
+\section{Bilan et Perspectives}
+%======================================================================
+
+\subsection{Points Forts}
+
+\begin{itemize}
+  \item \textbf{Recherche hybride avancee} : La combinaison Vector + BM25 + RRF
+        surpasse les systemes purement vectoriels pour les termes techniques
+        specifiques (numeros de procedures, codes, tolerances)
+  \item \textbf{Anti-hallucination multicouche} : 7 mecanismes complementaires
+        assurent une protection robuste
+  \item \textbf{Multi-LLM} : Flexibilite du choix du provider (local Ollama ou cloud)
+  \item \textbf{Bilingue FR/EN} : Adaptation automatique de la langue de reponse
+  \item \textbf{Tracabilite complete} : Audit trail + citations numerotees dans
+        chaque reponse
+\end{itemize}
+
+\subsection{Limitations et Ameliorations Futures}
+
+\begin{warningbox}[Limitations identifiees]
+\begin{enumerate}
+  \item \textbf{PDF scannees} : Pas d'OCR dans la version actuelle
+  \item \textbf{Une seule collection ChromaDB} : Pas d'isolation vectorielle stricte
+        par site -- une collection separee par tenant offrirait une meilleure isolation
+  \item \textbf{Endpoints non proteges} : \texttt{/api/chat} et upload sans
+        authentification obligatoire dans la version actuelle
+  \item \textbf{Evaluation manuelle incomplète} : Le jeu de Q\&R necessite d'etre
+        complete avec les reponses chatbot reelles pour calculer les scores finals
+\end{enumerate}
+\end{warningbox}
+
+\begin{table}[h]
+\centering
+\caption{Feuille de route -- ameliorations planifiees}
+\begin{tabular}{lll}
+\toprule
+\textbf{Amelioration} & \textbf{Priorite} & \textbf{Impact} \\
+\midrule
+OCR pour PDF scannes (Tesseract) & Haute & Couverture format \\
+Auth. obligatoire sur tous les endpoints & Haute & Securite \\
+Collections ChromaDB par site & Moyenne & Isolation donnees \\
+Feedback utilisateur (RLHF) & Moyenne & Qualite reponses \\
+Export rapports PDF/Excel d'audit & Basse & Ergonomie \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%======================================================================
+\section*{Conclusion}
+%======================================================================
+\addcontentsline{toc}{section}{Conclusion}
+
+Le projet QMS Chatbot RAG repond aux 6 points souleves par l'evaluateur :
+
+\begin{enumerate}
+  \item[$\checkmark$] \textbf{Corpus documentaire} : 5 documents de test fournis couvrant
+        tous les formats annonces (PDF, DOCX, XLSX, PPTX, PNG)
+  \item[$\checkmark$] \textbf{Jeu Q\&R} : 18 questions annotees (passages + reponses attendus
+        + 2 cas hors-contexte pour tester l'anti-hallucination)
+  \item[$\checkmark$] \textbf{Metriques retrieval} : Top-k accuracy, Recall@k, score cosinus
+        documentes, avec seuils explicites et script d'evaluation automatique
+  \item[$\checkmark$] \textbf{Anti-hallucination} : 7 mecanismes (prompt strict, JSON structure,
+        \texttt{answer\_in\_context}, seuils cosinus, temperature 0,15, citations, fallback)
+  \item[$\checkmark$] \textbf{Droits d'acces} : JWT + roles admin/user + criticite documentaire
+        + multi-tenant + chiffrement Fernet + audit trail complet
+  \item[$\checkmark$] \textbf{GitHub propre} : README complet, instructions d'installation,
+        corpus, jeu d'evaluation, documentation technique
+\end{enumerate}
+
+L'architecture RAG hybride (Vector + BM25 + RRF) avec des mecanismes anti-hallucination
+multicouches constitue une solution industriellement pertinente pour la gestion documentaire
+qualite dans un contexte ISO 9001:2015.
+
+\end{document}

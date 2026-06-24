@@ -728,11 +728,11 @@ export default function Chatbot() {
           <div className="messages-inner">
             {messages.length === 0 ? (
               <div className="welcome">
-                <div className="welcome-logo" style={{ width:64, height:64, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", background:"linear-gradient(135deg,#fff7ed,#ffedd5)", border:"2px solid #fed7aa" }}>
-                  <IconQMS size={38} />
+                <div className="welcome-logo">
+                  <IconQMS size={36} />
                 </div>
-                <h2 style={{ fontSize:24, fontWeight:600, color:"var(--color-text)", letterSpacing:"-0.02em" }}>{lbl.welcome}</h2>
-                <p style={{ fontSize:14, color:"var(--color-text-faint)", maxWidth:380, textAlign:"center" }}>{lbl.welcomeSub}</p>
+                <h2>{lbl.welcome}</h2>
+                <p>{lbl.welcomeSub}</p>
 
                 {/* ── Prompt suggestions ── */}
                 <div className="prompt-suggestions">
@@ -764,7 +764,7 @@ export default function Chatbot() {
                   <div key={i} className={`msg-row ${msg.role}`}>
                     {msg.role === "assistant" && (
                       <div className="msg-avatar claude" style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
-                        <IconQMS size={22} />
+                        <IconQMS size={20} />
                       </div>
                     )}
                     <div style={{ display:"flex", flexDirection:"column", maxWidth:"100%", flex:1 }}>
@@ -806,7 +806,7 @@ export default function Chatbot() {
             {isLoading && (
               <div className="msg-row assistant">
                 <div className="msg-avatar claude" style={{ display:"flex", alignItems:"center", justifyContent:"center" }}>
-                  <IconQMS size={22} />
+                  <IconQMS size={20} />
                 </div>
                 <div className="msg-bubble assistant">
                   <div className="thinking">

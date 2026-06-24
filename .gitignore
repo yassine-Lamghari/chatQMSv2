@@ -8,3 +8,8 @@ frontend/.next/
 __pycache__/
 *.pyc
 .DS_Store
+*.db
+chroma_db/
+uploads/
+backend/uploads/
+backend/server_log.txt  
